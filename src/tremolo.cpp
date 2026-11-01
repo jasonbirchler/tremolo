@@ -129,7 +129,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float vparam3 = param3.Process();
     const float vparam4 = param4.Process();
     const float vparam5 = param5.Process();
-    (void)param6.Process();
+    const float vparam6 = param6.Process();
 
     engine.SetDivision(
         TremoloEngine::DivisionFromKnob(vparam1, engine.GetDivision()));
@@ -137,6 +137,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     engine.SetShape(TremoloEngine::ShapeFromKnob(vparam3, engine.GetShape()));
     engine.SetSpread(vparam4);
     engine.SetModAmount(vparam5);
+    engine.SetModRate(vparam6);
     engine.SetBypassed(bypassed);
 
     // Drain MIDI input each block. Listen() also restarts the UART receiver if

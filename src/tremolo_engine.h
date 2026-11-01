@@ -122,12 +122,14 @@ class TremoloEngine
     void SetShape(int waveform);
     void SetSpread(float spread);
     void SetModAmount(float amount);
+    void SetModRate(float knob);
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
     void SetBypassed(bool bypassed) { bypassed_ = bypassed; }
 
     int   GetDivision() const { return division_; }
     int   GetShape() const { return shape_; }
+    float GetModRate() const { return smoothedModRate_; }
     float GetPrimaryPhase() const { return primaryPhase_; }
     float GetSecondaryPhase() const { return secondaryPhase_; }
     float GetRightPhase() const { return previousRightPhase_; }
@@ -137,6 +139,7 @@ class TremoloEngine
     static float Clamp01(float value);
     static float DivisionMultiplier(int division);
     static float PrimaryFrequency(float bpm, int division);
+    static float ModRateMultiplierFromKnob(float knob);
     static int   DivisionFromKnob(float knob, int currentDivision);
     static int   ShapeFromKnob(float knob, int currentShape);
     static float WaveformValue(int waveform, float phase, float randomValue);
@@ -156,10 +159,12 @@ class TremoloEngine
     float targetDepth_;
     float targetSpread_;
     float targetModAmount_;
+    float targetModMultiplier_;
 
     float smoothedDepth_;
     float smoothedSpread_;
     float smoothedModAmount_;
+    float smoothedModRate_;
     float smoothedGainL_;
     float smoothedGainR_;
     float effectiveDepth_;

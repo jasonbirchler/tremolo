@@ -10,6 +10,8 @@ const float kGainSmoothingSeconds = 0.001f;
 const float kMinBpm = 30.0f;
 const float kMaxBpm = 300.0f;
 const float kRateModOctaves = 1.0f;
+const float kModRateSlowMultiplier = 1.0f / 32.0f;
+const float kModRateFastMultiplier = 1.5f;
 const float kSpreadPhaseCycles = 0.25f;
 const float kSpreadSideMaxGain = 1.5f;
 
@@ -154,15 +156,16 @@ void TremoloEngine::Init(float sampleRate)
     mixCoefficient_ = parameterCoefficient_;
     gainCoefficient_ = 1.0f - expf(-1.0f / (kGainSmoothingSeconds * sampleRate_));
 
-    targetTempo_     = 120.0f;
-    division_        = DIV_QUARTER;
-    shape_           = WAVE_SINE;
-    targetDepth_     = 0.0f;
-    targetSpread_    = 0.0f;
-    targetModAmount_ = 0.0f;
-    modWaveform_     = MOD_SINE;
-    modTarget_       = TARGET_DEPTH;
-    bypassed_        = true;
+    targetTempo_         = 120.0f;
+    division_            = DIV_QUARTER;
+    shape_               = WAVE_SINE;
+    targetDepth_         = 0.0f;
+    targetSpread_        = 0.0f;
+    targetModAmount_     = 0.0f;
+    targetModMultiplier_ = ModRateMultiplierFromKnob(0.5f);
+    modWaveform_         = MOD_SINE;
+    modTarget_           = TARGET_DEPTH;
+    bypassed_            = true;
 
     Reset();
 }
@@ -172,8 +175,10 @@ void TremoloEngine::Reset()
     smoothedDepth_     = targetDepth_;
     smoothedSpread_    = targetSpread_;
     smoothedModAmount_ = targetModAmount_;
-    smoothedGainL_     = 1.0f;
-    smoothedGainR_     = 1.0f;
+    smoothedModRate_
+        = PrimaryFrequency(targetTempo_, division_) * targetModMultiplier_;
+    smoothedGainL_ = 1.0f;
+    smoothedGainR_ = 1.0f;
 
     effectiveDepth_  = targetDepth_;
     effectiveSpread_ = targetSpread_;
@@ -229,6 +234,11 @@ void TremoloEngine::SetModAmount(float amount)
     targetModAmount_ = Clamp01(amount);
 }
 
+void TremoloEngine::SetModRate(float knob)
+{
+    targetModMultiplier_ = ModRateMultiplierFromKnob(knob);
+}
+
 void TremoloEngine::SetModWaveform(int waveform)
 {
     if(waveform < 0)
@@ -249,9 +259,9 @@ void TremoloEngine::SetModTarget(int target)
 
 void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 {
-    const float secondaryFrequency = (targetTempo_ / 60.0f) / 16.0f;
-    const float secondaryIncrement = secondaryFrequency / sampleRate_;
     const float targetMix = bypassed_ ? 0.0f : 1.0f;
+    const float targetModRate
+        = PrimaryFrequency(targetTempo_, division_) * targetModMultiplier_;
 
     smoothedDepth_
         += parameterCoefficient_ * (targetDepth_ - smoothedDepth_);
@@ -259,7 +269,11 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
         += parameterCoefficient_ * (targetSpread_ - smoothedSpread_);
     smoothedModAmount_
         += parameterCoefficient_ * (targetModAmount_ - smoothedModAmount_);
+    smoothedModRate_
+        += parameterCoefficient_ * (targetModRate - smoothedModRate_);
     mix_ += mixCoefficient_ * (targetMix - mix_);
+
+    const float secondaryIncrement = smoothedModRate_ / sampleRate_;
 
     const float modLfo = ModWaveformValue(modWaveform_, secondaryPhase_);
     const float modValue = smoothedModAmount_ * modLfo;
@@ -367,6 +381,14 @@ float TremoloEngine::DivisionMultiplier(int division)
 float TremoloEngine::PrimaryFrequency(float bpm, int division)
 {
     return (bpm / 60.0f) * DivisionMultiplier(division);
+}
+
+float TremoloEngine::ModRateMultiplierFromKnob(float knob)
+{
+    knob = Clamp01(knob);
+    if(knob <= 0.5f)
+        return powf(kModRateSlowMultiplier, 1.0f - 2.0f * knob);
+    return powf(kModRateFastMultiplier, 2.0f * (knob - 0.5f));
 }
 
 int TremoloEngine::DivisionFromKnob(float knob, int currentDivision)

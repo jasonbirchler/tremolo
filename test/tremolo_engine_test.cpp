@@ -285,6 +285,50 @@ static void TestRandomHoldsForOneCycle()
     CHECK(changed);
 }
 
+static void TestModRateMapping()
+{
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(-1.0f),
+               1.0f / 32.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(0.0f),
+               1.0f / 32.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(0.25f),
+               std::sqrt(1.0f / 32.0f), 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(0.5f), 1.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(0.75f),
+               std::sqrt(1.5f), 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(1.0f), 1.5f, 1e-6);
+    CHECK_NEAR(TremoloEngine::ModRateMultiplierFromKnob(2.0f), 1.5f, 1e-6);
+
+    TremoloEngine engine;
+    engine.Init(48000.0f);
+    engine.SetTempo(60.0f);
+    engine.SetDivision(TremoloEngine::DIV_QUARTER);
+
+    float outL = 0.0f;
+    float outR = 0.0f;
+
+    engine.SetModRate(0.5f);
+    for(int i = 0; i < 4800; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
+    CHECK_NEAR(engine.GetModRate(), 1.0f, 1e-4);
+
+    engine.SetModRate(0.0f);
+    for(int i = 0; i < 4800; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
+    CHECK_NEAR(engine.GetModRate(), 1.0f / 32.0f, 1e-4);
+
+    engine.SetModRate(1.0f);
+    for(int i = 0; i < 4800; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
+    CHECK_NEAR(engine.GetModRate(), 1.5f, 1e-4);
+
+    engine.SetModRate(0.5f);
+    engine.SetTempo(120.0f);
+    for(int i = 0; i < 4800; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
+    CHECK_NEAR(engine.GetModRate(), 2.0f, 1e-4);
+}
+
 static void TestModulationClamps()
 {
     CHECK_NEAR(TremoloEngine::Clamp01(-0.5f), 0.0f, 1e-6);
@@ -300,6 +344,7 @@ static void TestModulationClamps()
     engine.SetShape(TremoloEngine::WAVE_SINE);
     engine.SetSpread(0.0f);
     engine.SetModAmount(1.0f);
+    engine.SetModRate(0.0f);
     engine.SetModWaveform(TremoloEngine::MOD_SQUARE);
     engine.SetModTarget(TremoloEngine::TARGET_DEPTH);
 
@@ -474,6 +519,7 @@ int main()
     TestSpread();
     TestShapeSelection();
     TestRandomHoldsForOneCycle();
+    TestModRateMapping();
     TestModulationClamps();
     TestRateModulationTarget();
     TestTapTempo();

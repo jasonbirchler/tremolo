@@ -10,8 +10,8 @@ Stereo tremolo for the GuitarML FunBox v3 (Daisy Seed) platform.
 | Knob 2 | Depth | 0 = dry, 1 = full tremolo (troughs mute). |
 | Knob 3 | Shape | Discrete selection of sine, triangle, saw, reverse saw, square, random. Equal bands with hysteresis. |
 | Knob 4 | Stereo spread | Moves the right LFO from 0 to 90 degrees out of phase (linear) and boosts the mid/side side level from parity to 1.5x the mid (logarithmic). |
-| Knob 5 | Modulation amount | Depth of the second, tempo-synced LFO. |
-| Knob 6 | Unused | Read but ignored. |
+| Knob 5 | Modulation amount | Depth of the second, independent LFO. |
+| Knob 6 | LFO rate | Sets the second LFO rate relative to the tremolo rate: 32x slower at 0, 1x at noon, and 1.5x at 1, with geometric steps in between. |
 | 3-Way Switch 1 | Second LFO waveform | Left = sine, center = saw, right = square. |
 | 3-Way Switch 2 | Second LFO target | Left = depth, center = depth + rate, right = rate. |
 | 3-Way Switch 3 | Unused | |
@@ -27,7 +27,7 @@ Stereo tremolo for the GuitarML FunBox v3 (Daisy Seed) platform.
 
 ## Behavior notes
 
-- The second LFO runs at one cycle per 16 quarter notes (4 bars in 4/4).
+- The second LFO rate follows the tremolo rate. Knob 6 scales it geometrically from 1/32 the tremolo rate at 0, through parity at noon, to 1.5x the tremolo rate at 1.
 - Rate modulation is exponential: at full modulation amount the primary LFO rate sweeps between 0.5x and 2x (one octave down/up). The target is smoothed to avoid clicks.
 - Bypass is a click-free wet/dry crossfade, not a relay. The wet path keeps running while bypassed.
 - Tempo range is 30..300 BPM; the default is 120 BPM.
