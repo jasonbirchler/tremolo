@@ -168,7 +168,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float bpm = tempo.Bpm(now);
     engine.SetTempo(bpm);
 
-    const float sampleRate = hw.AudioSampleRate();
+    const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = pdip[0];
 
     for(size_t i = 0; i < size; i++)

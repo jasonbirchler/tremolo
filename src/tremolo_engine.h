@@ -139,6 +139,8 @@ class TremoloEngine
     float GetSecondaryPhase() const { return secondaryPhase_; }
     float GetRightPhase() const { return previousRightPhase_; }
     float GetEnvelope() const { return envelope_; }
+    float GetSampleRate() const { return sampleRate_; }
+
 
     void Process(float inL, float inR, float* outL, float* outR);
 

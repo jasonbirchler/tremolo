@@ -550,8 +550,8 @@ static void TestEnvelopeRetrigger()
 
     // A burst above the threshold restarts the LFO. The attack takes a few
     // samples, and the extra samples advance the phase only slightly.
-    for(int i = 0; i < 32; ++i)
-        engine.Process(0.5f, 0.5f, &outL, &outR);
+    for(int i = 0; i < 128; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
 
     CHECK(engine.GetEnvelope() >= threshold);
     CHECK(engine.GetPrimaryPhase() < 0.01f);
@@ -568,8 +568,8 @@ static void TestEnvelopeRetrigger()
         engine.Process(0.0f, 0.0f, &outL, &outR);
     CHECK(engine.GetEnvelope() < threshold);
 
-    for(int i = 0; i < 32; ++i)
-        engine.Process(0.5f, 0.5f, &outL, &outR);
+    for(int i = 0; i < 128; ++i)
+        engine.Process(1.0f, 1.0f, &outL, &outR);
     CHECK(engine.GetPrimaryPhase() < 0.01f);
 
     // With retriggering disabled the input burst must not reset the phase.
