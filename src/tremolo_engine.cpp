@@ -6,6 +6,7 @@ namespace
 {
 const float kTwoPi = 6.28318530717958647692f;
 const float kSmoothingSeconds = 0.005f;
+const float kGainSmoothingSeconds = 0.001f;
 const float kMinBpm = 30.0f;
 const float kMaxBpm = 300.0f;
 const float kRateModOctaves = 1.0f;
@@ -149,6 +150,7 @@ void TremoloEngine::Init(float sampleRate)
     parameterCoefficient_
         = 1.0f - expf(-1.0f / (kSmoothingSeconds * sampleRate_));
     mixCoefficient_ = parameterCoefficient_;
+    gainCoefficient_ = 1.0f - expf(-1.0f / (kGainSmoothingSeconds * sampleRate_));
 
     targetTempo_     = 120.0f;
     division_        = DIV_QUARTER;
@@ -168,6 +170,8 @@ void TremoloEngine::Reset()
     smoothedDepth_     = targetDepth_;
     smoothedOffset_    = targetOffset_;
     smoothedModAmount_ = targetModAmount_;
+    smoothedGainL_     = 1.0f;
+    smoothedGainR_     = 1.0f;
 
     effectiveDepth_  = targetDepth_;
     effectiveOffset_ = targetOffset_;
@@ -301,10 +305,16 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
     const float lfoL = WaveformValue(shape_, phaseL, randomLeft_);
     const float lfoR = WaveformValue(shape_, phaseR, randomRight_);
 
-    const float gainL = ClampFloat(
+    const float targetGainL = ClampFloat(
         1.0f - depthEff * (1.0f - lfoL) * 0.5f, 0.0f, 1.0f);
-    const float gainR = ClampFloat(
+    const float targetGainR = ClampFloat(
         1.0f - depthEff * (1.0f - lfoR) * 0.5f, 0.0f, 1.0f);
+
+    smoothedGainL_ += gainCoefficient_ * (targetGainL - smoothedGainL_);
+    smoothedGainR_ += gainCoefficient_ * (targetGainR - smoothedGainR_);
+
+    const float gainL = smoothedGainL_;
+    const float gainR = smoothedGainR_;
 
     const float wetL = inL * gainL;
     const float wetR = inR * gainR;

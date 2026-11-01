@@ -157,7 +157,8 @@ class TremoloEngine
     float smoothedDepth_;
     float smoothedOffset_;
     float smoothedModAmount_;
-
+    float smoothedGainL_;
+    float smoothedGainR_;
     float effectiveDepth_;
     float effectiveOffset_;
     float effectiveRate_;
@@ -177,6 +178,6 @@ class TremoloEngine
     float mix_;
     float mixCoefficient_;
     float parameterCoefficient_;
-};
+    float gainCoefficient_;};
 
 #endif // TREMOLO_ENGINE_H
