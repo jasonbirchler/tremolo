@@ -14,6 +14,10 @@ const float kModRateSlowMultiplier = 1.0f / 32.0f;
 const float kModRateFastMultiplier = 1.5f;
 const float kSpreadPhaseCycles = 0.25f;
 const float kSpreadSideMaxGain = 1.5f;
+const float kEnvelopeAttackSeconds = 0.001f;
+const float kEnvelopeReleaseSeconds = 0.1f;
+const float kEnvelopeRearmRatio = 0.7f;
+const float kDefaultRetriggerThreshold = 0.75f;
 
 float ClampFloat(float value, float low, float high)
 {
@@ -155,6 +159,10 @@ void TremoloEngine::Init(float sampleRate)
         = 1.0f - expf(-1.0f / (kSmoothingSeconds * sampleRate_));
     mixCoefficient_ = parameterCoefficient_;
     gainCoefficient_ = 1.0f - expf(-1.0f / (kGainSmoothingSeconds * sampleRate_));
+    envelopeAttackCoefficient_
+        = 1.0f - expf(-1.0f / (kEnvelopeAttackSeconds * sampleRate_));
+    envelopeReleaseCoefficient_
+        = 1.0f - expf(-1.0f / (kEnvelopeReleaseSeconds * sampleRate_));
 
     targetTempo_         = 120.0f;
     division_            = DIV_QUARTER;
@@ -166,6 +174,11 @@ void TremoloEngine::Init(float sampleRate)
     modWaveform_         = MOD_SINE;
     modTarget_           = TARGET_DEPTH;
     bypassed_            = true;
+
+    retriggerEnabled_    = false;
+    retriggerArmed_      = true;
+    retriggerThreshold_  = kDefaultRetriggerThreshold;
+    envelope_            = 0.0f;
 
     Reset();
 }
@@ -259,6 +272,8 @@ void TremoloEngine::SetModTarget(int target)
 
 void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 {
+    UpdateEnvelope(inL, inR);
+
     const float targetMix = bypassed_ ? 0.0f : 1.0f;
     const float targetModRate
         = PrimaryFrequency(targetTempo_, division_) * targetModMultiplier_;
@@ -357,6 +372,44 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
         = FractionalPart(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
     if(nextRightPhase < previousRightPhase_)
         randomRight_ = NextRandom();
+}
+
+void TremoloEngine::UpdateEnvelope(float inL, float inR)
+{
+    // Track the peak amplitude of the two input channels. A fast attack keeps
+    // note starts sharp; a slow release prevents the follower from chattering
+    // between the individual cycles of a low-frequency input.
+    const float amplitude = fmaxf(fabsf(inL), fabsf(inR));
+    const float coefficient
+        = amplitude > envelope_ ? envelopeAttackCoefficient_
+                                : envelopeReleaseCoefficient_;
+    envelope_ += coefficient * (amplitude - envelope_);
+
+    if(!retriggerEnabled_)
+        return;
+
+    // Re-arm only after the signal falls back below the threshold, so a
+    // sustained note restarts the LFO once rather than on every sample.
+    if(!retriggerArmed_)
+    {
+        if(envelope_ < retriggerThreshold_ * kEnvelopeRearmRatio)
+            retriggerArmed_ = true;
+        return;
+    }
+
+    if(envelope_ >= retriggerThreshold_)
+    {
+        RestartPrimaryLfo();
+        retriggerArmed_ = false;
+    }
+}
+
+void TremoloEngine::RestartPrimaryLfo()
+{
+    primaryPhase_      = 0.0f;
+    previousRightPhase_ = 0.0f;
+    randomLeft_        = NextRandom();
+    randomRight_       = NextRandom();
 }
 
 float TremoloEngine::Clamp01(float value)

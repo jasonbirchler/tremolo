@@ -152,6 +152,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     engine.SetModAmount(vparam5);
     engine.SetModRate(vparam6);
     engine.SetBypassed(bypassed);
+    engine.SetRetriggerEnabled(pdip[1]);
 
     // Drain MIDI input each block. Listen() also restarts the UART receiver if
     // it stopped after an overrun.

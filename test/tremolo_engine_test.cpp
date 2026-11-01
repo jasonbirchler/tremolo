@@ -522,6 +522,75 @@ static void TestTempoSelection()
     CHECK_NEAR(controller.Bpm(lastClock + 2000), tapBpm, 0.01f);
 }
 
+static void TestEnvelopeRetrigger()
+{
+    const float sampleRate = 48000.0f;
+    const float threshold  = 0.75f;
+
+    TremoloEngine engine;
+    engine.Init(sampleRate);
+    engine.SetBypassed(false);
+    engine.SetDepth(1.0f);
+    engine.SetShape(TremoloEngine::WAVE_SINE);
+    engine.SetTempo(60.0f);
+    engine.SetDivision(TremoloEngine::DIV_QUARTER);
+    engine.SetRetriggerThreshold(threshold);
+    engine.SetRetriggerEnabled(true);
+
+    float outL = 0.0f;
+    float outR = 0.0f;
+
+    // Advance the LFO roughly a quarter cycle with a signal that stays below
+    // the trigger threshold.
+    for(int i = 0; i < 12000; ++i)
+        engine.Process(0.001f, 0.001f, &outL, &outR);
+
+    const float phaseBefore = engine.GetPrimaryPhase();
+    CHECK(phaseBefore > 0.2f);
+
+    // A burst above the threshold restarts the LFO. The attack takes a few
+    // samples, and the extra samples advance the phase only slightly.
+    for(int i = 0; i < 32; ++i)
+        engine.Process(0.5f, 0.5f, &outL, &outR);
+
+    CHECK(engine.GetEnvelope() >= threshold);
+    CHECK(engine.GetPrimaryPhase() < 0.01f);
+
+    // While the input stays above the threshold the LFO keeps running instead
+    // of being restarted on every sample.
+    const float phaseHeld = engine.GetPrimaryPhase();
+    for(int i = 0; i < 100; ++i)
+        engine.Process(0.5f, 0.5f, &outL, &outR);
+    CHECK(engine.GetPrimaryPhase() > phaseHeld);
+
+    // Drop below the re-arm level, then trigger a second time.
+    for(int i = 0; i < 30000; ++i)
+        engine.Process(0.0f, 0.0f, &outL, &outR);
+    CHECK(engine.GetEnvelope() < threshold);
+
+    for(int i = 0; i < 32; ++i)
+        engine.Process(0.5f, 0.5f, &outL, &outR);
+    CHECK(engine.GetPrimaryPhase() < 0.01f);
+
+    // With retriggering disabled the input burst must not reset the phase.
+    TremoloEngine disabled;
+    disabled.Init(sampleRate);
+    disabled.SetBypassed(false);
+    disabled.SetDepth(1.0f);
+    disabled.SetTempo(60.0f);
+    disabled.SetDivision(TremoloEngine::DIV_QUARTER);
+
+    for(int i = 0; i < 12000; ++i)
+        disabled.Process(0.001f, 0.001f, &outL, &outR);
+
+    const float disabledBefore = disabled.GetPrimaryPhase();
+    for(int i = 0; i < 32; ++i)
+        disabled.Process(0.5f, 0.5f, &outL, &outR);
+
+    CHECK(disabled.GetPrimaryPhase() > disabledBefore);
+    CHECK(disabled.GetPrimaryPhase() > 0.2f);
+}
+
 int main()
 {
     TestDepthZeroIsUnity();
@@ -537,6 +606,7 @@ int main()
     TestTapTempo();
     TestMidiClock();
     TestTempoSelection();
+    TestEnvelopeRetrigger();
 
     if(failures == 0)
     {

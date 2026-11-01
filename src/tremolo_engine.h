@@ -126,6 +126,11 @@ class TremoloEngine
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
     void SetBypassed(bool bypassed) { bypassed_ = bypassed; }
+    void SetRetriggerEnabled(bool enabled) { retriggerEnabled_ = enabled; }
+    void SetRetriggerThreshold(float threshold)
+    {
+        retriggerThreshold_ = Clamp01(threshold);
+    }
 
     int   GetDivision() const { return division_; }
     int   GetShape() const { return shape_; }
@@ -133,6 +138,7 @@ class TremoloEngine
     float GetPrimaryPhase() const { return primaryPhase_; }
     float GetSecondaryPhase() const { return secondaryPhase_; }
     float GetRightPhase() const { return previousRightPhase_; }
+    float GetEnvelope() const { return envelope_; }
 
     void Process(float inL, float inR, float* outL, float* outR);
 
@@ -150,6 +156,8 @@ class TremoloEngine
     static float FractionalPart(float value);
     static uint32_t NextRandomBits(uint32_t state);
     float           NextRandom();
+    void            UpdateEnvelope(float inL, float inR);
+    void            RestartPrimaryLfo();
 
     float sampleRate_;
 
@@ -186,6 +194,13 @@ class TremoloEngine
     float mix_;
     float mixCoefficient_;
     float parameterCoefficient_;
-    float gainCoefficient_;};
+    float gainCoefficient_;
+
+    bool  retriggerEnabled_;
+    bool  retriggerArmed_;
+    float retriggerThreshold_;
+    float envelope_;
+    float envelopeAttackCoefficient_;
+    float envelopeReleaseCoefficient_;};
 
 #endif // TREMOLO_ENGINE_H
