@@ -9,7 +9,7 @@ Stereo tremolo for the GuitarML FunBox v3 (Daisy Seed) platform.
 | Knob 1 | Division | Quarter, dotted quarter, eighth, dotted eighth, sixteenth, dotted sixteenth. Stepped with hysteresis. |
 | Knob 2 | Depth | 0 = dry, 1 = full tremolo (troughs mute). |
 | Knob 3 | Shape | Discrete selection of sine, triangle, saw, reverse saw, square, random. Equal bands with hysteresis. |
-| Knob 4 | Phase offset | 0..90 degrees between the left and right LFO. |
+| Knob 4 | Stereo spread | Moves the right LFO from 0 to 90 degrees out of phase (linear) and boosts the mid/side side level from parity to 1.5x the mid (logarithmic). |
 | Knob 5 | Modulation amount | Depth of the second, tempo-synced LFO. |
 | Knob 6 | Unused | Read but ignored. |
 | 3-Way Switch 1 | Second LFO waveform | Left = sine, center = saw, right = square. |

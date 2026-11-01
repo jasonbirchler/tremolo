@@ -10,6 +10,8 @@ const float kGainSmoothingSeconds = 0.001f;
 const float kMinBpm = 30.0f;
 const float kMaxBpm = 300.0f;
 const float kRateModOctaves = 1.0f;
+const float kSpreadPhaseCycles = 0.25f;
+const float kSpreadSideMaxGain = 1.5f;
 
 float ClampFloat(float value, float low, float high)
 {
@@ -156,7 +158,7 @@ void TremoloEngine::Init(float sampleRate)
     division_        = DIV_QUARTER;
     shape_           = WAVE_SINE;
     targetDepth_     = 0.0f;
-    targetOffset_    = 0.0f;
+    targetSpread_    = 0.0f;
     targetModAmount_ = 0.0f;
     modWaveform_     = MOD_SINE;
     modTarget_       = TARGET_DEPTH;
@@ -168,13 +170,13 @@ void TremoloEngine::Init(float sampleRate)
 void TremoloEngine::Reset()
 {
     smoothedDepth_     = targetDepth_;
-    smoothedOffset_    = targetOffset_;
+    smoothedSpread_    = targetSpread_;
     smoothedModAmount_ = targetModAmount_;
     smoothedGainL_     = 1.0f;
     smoothedGainR_     = 1.0f;
 
     effectiveDepth_  = targetDepth_;
-    effectiveOffset_ = targetOffset_;
+    effectiveSpread_ = targetSpread_;
     effectiveRate_   = 1.0f;
 
     primaryPhase_   = 0.0f;
@@ -184,7 +186,7 @@ void TremoloEngine::Reset()
     randomLeft_   = NextRandom();
     randomRight_  = NextRandom();
 
-    previousRightPhase_ = FractionalPart(smoothedOffset_ * 0.25f);
+    previousRightPhase_ = FractionalPart(smoothedSpread_ * kSpreadPhaseCycles);
 
     mix_ = bypassed_ ? 0.0f : 1.0f;
 }
@@ -217,9 +219,9 @@ void TremoloEngine::SetShape(int waveform)
     shape_ = waveform;
 }
 
-void TremoloEngine::SetOffset(float offset)
+void TremoloEngine::SetSpread(float spread)
 {
-    targetOffset_ = Clamp01(offset);
+    targetSpread_ = Clamp01(spread);
 }
 
 void TremoloEngine::SetModAmount(float amount)
@@ -253,8 +255,8 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 
     smoothedDepth_
         += parameterCoefficient_ * (targetDepth_ - smoothedDepth_);
-    smoothedOffset_
-        += parameterCoefficient_ * (targetOffset_ - smoothedOffset_);
+    smoothedSpread_
+        += parameterCoefficient_ * (targetSpread_ - smoothedSpread_);
     smoothedModAmount_
         += parameterCoefficient_ * (targetModAmount_ - smoothedModAmount_);
     mix_ += mixCoefficient_ * (targetMix - mix_);
@@ -263,7 +265,7 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
     const float modValue = smoothedModAmount_ * modLfo;
 
     float depthEff  = smoothedDepth_;
-    float offsetEff = smoothedOffset_;
+    float spreadEff = smoothedSpread_;
     float rateScale = 1.0f;
 
     switch(modTarget_)
@@ -280,19 +282,19 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
     }
 
     depthEff  = Clamp01(depthEff);
-    offsetEff = Clamp01(offsetEff);
+    spreadEff = Clamp01(spreadEff);
 
     // Smooth the effective values too, so changing the modulation target or
     // hitting a square modulation edge does not produce a click.
     effectiveDepth_
         += parameterCoefficient_ * (depthEff - effectiveDepth_);
-    effectiveOffset_
-        += parameterCoefficient_ * (offsetEff - effectiveOffset_);
+    effectiveSpread_
+        += parameterCoefficient_ * (spreadEff - effectiveSpread_);
     effectiveRate_
         += parameterCoefficient_ * (rateScale - effectiveRate_);
 
     depthEff  = effectiveDepth_;
-    offsetEff = effectiveOffset_;
+    spreadEff = effectiveSpread_;
 
     const float primaryFrequency
         = PrimaryFrequency(targetTempo_, division_) * effectiveRate_;
@@ -300,7 +302,7 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 
     const float phaseL = primaryPhase_;
     const float phaseR
-        = FractionalPart(primaryPhase_ + offsetEff * 0.25f);
+        = FractionalPart(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
 
     const float lfoL = WaveformValue(shape_, phaseL, randomLeft_);
     const float lfoR = WaveformValue(shape_, phaseR, randomRight_);
@@ -316,8 +318,10 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
     const float gainL = smoothedGainL_;
     const float gainR = smoothedGainR_;
 
-    const float wetL = inL * gainL;
-    const float wetR = inR * gainR;
+    float wetL = inL * gainL;
+    float wetR = inR * gainR;
+
+    ApplySpread(&wetL, &wetR, spreadEff);
 
     *outL = inL + (wetL - inL) * mix_;
     *outR = inR + (wetR - inR) * mix_;
@@ -336,7 +340,7 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
         secondaryPhase_ -= floorf(secondaryPhase_);
 
     const float nextRightPhase
-        = FractionalPart(primaryPhase_ + offsetEff * 0.25f);
+        = FractionalPart(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
     if(nextRightPhase < previousRightPhase_)
         randomRight_ = NextRandom();
 }
@@ -434,6 +438,23 @@ int TremoloEngine::ShapeFromKnob(float knob, int currentShape)
         --shape;
 
     return shape;
+}
+
+float TremoloEngine::SpreadSideGain(float spread)
+{
+    // The side level rises logarithmically from unity (equal to mid) at 0 to
+    // 1.5x the mid level at full spread.
+    return powf(kSpreadSideMaxGain, Clamp01(spread));
+}
+
+void TremoloEngine::ApplySpread(float* left, float* right, float spread)
+{
+    const float sideGain = SpreadSideGain(spread);
+    const float mid      = (*left + *right) * 0.5f;
+    const float side     = (*left - *right) * 0.5f;
+
+    *left  = mid + sideGain * side;
+    *right = mid - sideGain * side;
 }
 
 float TremoloEngine::FractionalPart(float value)

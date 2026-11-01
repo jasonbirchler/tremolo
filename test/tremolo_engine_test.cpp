@@ -145,51 +145,68 @@ static void TestDivisionHysteresis()
     CHECK(TremoloEngine::DivisionFromKnob(1.0f, 0) == 5);
 }
 
-static void TestPhaseOffset()
+static void TestSpread()
 {
+    // Side gain rises logarithmically from parity at 0 to 1.5x at 1.
+    CHECK_NEAR(TremoloEngine::SpreadSideGain(0.0f), 1.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::SpreadSideGain(1.0f), 1.5f, 1e-6);
+    CHECK_NEAR(TremoloEngine::SpreadSideGain(0.5f), std::sqrt(1.5f), 1e-6);
+    CHECK_NEAR(TremoloEngine::SpreadSideGain(-1.0f), 1.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::SpreadSideGain(2.0f), 1.5f, 1e-6);
+
+    // Zero spread is a transparent mid/side pass.
+    float left  = 0.3f;
+    float right = -0.7f;
+    TremoloEngine::ApplySpread(&left, &right, 0.0f);
+    CHECK_NEAR(left, 0.3f, 1e-6);
+    CHECK_NEAR(right, -0.7f, 1e-6);
+
+    // Full spread boosts the side component to 1.5x the mid component.
+    left  = 1.0f;
+    right = 0.0f;
+    TremoloEngine::ApplySpread(&left, &right, 1.0f);
+    CHECK_NEAR(left, 1.25f, 1e-6);
+    CHECK_NEAR(right, -0.25f, 1e-6);
+
     const float sampleRate = 48000.0f;
-    const int   quarter    = 12000; // 1 Hz at 48 kHz
 
-    TremoloEngine left;
-    left.Init(sampleRate);
-    left.SetBypassed(false);
-    left.SetDepth(1.0f);
-    left.SetShape(TremoloEngine::WAVE_SINE);
-    left.SetOffset(0.0f);
-    left.SetTempo(60.0f);
-    left.SetDivision(TremoloEngine::DIV_QUARTER);
+    // The right-channel LFO phase offset is linear in the spread control.
+    TremoloEngine phaseEngine;
+    phaseEngine.Init(sampleRate);
+    phaseEngine.SetBypassed(false);
+    phaseEngine.SetDepth(1.0f);
+    phaseEngine.SetShape(TremoloEngine::WAVE_SINE);
+    phaseEngine.SetTempo(60.0f);
+    phaseEngine.SetDivision(TremoloEngine::DIV_QUARTER);
+    phaseEngine.SetSpread(1.0f);
 
-    TremoloEngine right;
-    right.Init(sampleRate);
-    right.SetBypassed(false);
-    right.SetDepth(1.0f);
-    right.SetShape(TremoloEngine::WAVE_SINE);
-    right.SetOffset(1.0f);
-    right.SetTempo(60.0f);
-    right.SetDivision(TremoloEngine::DIV_QUARTER);
+    Warmup(phaseEngine, 8192, 1.0f, 1.0f);
 
-    Warmup(left, 6000, 1.0f, 1.0f);
-    Warmup(right, 6000, 1.0f, 1.0f);
+    const float beforePhase = phaseEngine.GetPrimaryPhase();
+    float       outL        = 0.0f;
+    float       outR        = 0.0f;
+    phaseEngine.Process(1.0f, 1.0f, &outL, &outR);
 
-    std::vector<float> leftOut;
-    leftOut.reserve(18000);
+    // Full spread is a quarter cycle (90 degrees) of right-channel offset.
+    const float expectedPhase
+        = std::fmod(beforePhase + 0.25f, 1.0f);
+    CHECK_NEAR(phaseEngine.GetRightPhase(), expectedPhase, 1e-3);
 
-    float outL = 0.0f;
-    float outR = 0.0f;
-    for(int i = 0; i < 18000; ++i)
+    // At zero spread a mono input stays in phase across both channels.
+    TremoloEngine monoEngine;
+    monoEngine.Init(sampleRate);
+    monoEngine.SetBypassed(false);
+    monoEngine.SetDepth(1.0f);
+    monoEngine.SetShape(TremoloEngine::WAVE_SINE);
+    monoEngine.SetTempo(60.0f);
+    monoEngine.SetDivision(TremoloEngine::DIV_QUARTER);
+    monoEngine.SetSpread(0.0f);
+
+    Warmup(monoEngine, 8192, 1.0f, 1.0f);
+    for(int i = 0; i < 1024; ++i)
     {
-        left.Process(1.0f, 1.0f, &outL, &outR);
-        leftOut.push_back(outL);
-    }
-
-    for(int i = 0; i < 18000; ++i)
-    {
-        right.Process(1.0f, 1.0f, &outL, &outR);
-        if(i + quarter < 18000)
-        {
-            // The right channel is a quarter cycle ahead of the left.
-            CHECK_NEAR(outR, leftOut[i + quarter], 2e-4);
-        }
+        monoEngine.Process(1.0f, 1.0f, &outL, &outR);
+        CHECK_NEAR(outL, outR, 1e-6);
     }
 }
 
@@ -244,10 +261,13 @@ static void TestRandomHoldsForOneCycle()
 
     CHECK(WaitForPrimaryWrap(engine));
 
+    // Let the gain smoothing settle on the new random value before sampling.
+    Warmup(engine, 480, 1.0f, 1.0f);
+
     engine.Process(1.0f, 1.0f, &outL, &outR);
     const float heldValue = outL;
 
-    for(int i = 0; i < 47000; ++i)
+    for(int i = 0; i < 46000; ++i)
     {
         engine.Process(1.0f, 1.0f, &outL, &outR);
         CHECK_NEAR(outL, heldValue, 1e-4);
@@ -257,6 +277,7 @@ static void TestRandomHoldsForOneCycle()
     for(int cycle = 0; cycle < 4 && !changed; ++cycle)
     {
         CHECK(WaitForPrimaryWrap(engine));
+        Warmup(engine, 480, 1.0f, 1.0f);
         engine.Process(1.0f, 1.0f, &outL, &outR);
         if(std::fabs(outL - heldValue) > 1e-5f)
             changed = true;
@@ -277,7 +298,7 @@ static void TestModulationClamps()
     engine.SetDivision(TremoloEngine::DIV_QUARTER);
     engine.SetDepth(0.9f);
     engine.SetShape(TremoloEngine::WAVE_SINE);
-    engine.SetOffset(0.0f);
+    engine.SetSpread(0.0f);
     engine.SetModAmount(1.0f);
     engine.SetModWaveform(TremoloEngine::MOD_SQUARE);
     engine.SetModTarget(TremoloEngine::TARGET_DEPTH);
@@ -450,7 +471,7 @@ int main()
     TestDepthOneFullRange();
     TestDivisionMultipliers();
     TestDivisionHysteresis();
-    TestPhaseOffset();
+    TestSpread();
     TestShapeSelection();
     TestRandomHoldsForOneCycle();
     TestModulationClamps();

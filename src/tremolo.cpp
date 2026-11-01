@@ -135,7 +135,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         TremoloEngine::DivisionFromKnob(vparam1, engine.GetDivision()));
     engine.SetDepth(vparam2);
     engine.SetShape(TremoloEngine::ShapeFromKnob(vparam3, engine.GetShape()));
-    engine.SetOffset(vparam4);
+    engine.SetSpread(vparam4);
     engine.SetModAmount(vparam5);
     engine.SetBypassed(bypassed);
 

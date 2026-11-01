@@ -120,7 +120,7 @@ class TremoloEngine
     void SetDivision(int division);
     void SetDepth(float depth);
     void SetShape(int waveform);
-    void SetOffset(float offset);
+    void SetSpread(float spread);
     void SetModAmount(float amount);
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
@@ -130,6 +130,7 @@ class TremoloEngine
     int   GetShape() const { return shape_; }
     float GetPrimaryPhase() const { return primaryPhase_; }
     float GetSecondaryPhase() const { return secondaryPhase_; }
+    float GetRightPhase() const { return previousRightPhase_; }
 
     void Process(float inL, float inR, float* outL, float* outR);
 
@@ -139,6 +140,8 @@ class TremoloEngine
     static int   DivisionFromKnob(float knob, int currentDivision);
     static int   ShapeFromKnob(float knob, int currentShape);
     static float WaveformValue(int waveform, float phase, float randomValue);
+    static float SpreadSideGain(float spread);
+    static void  ApplySpread(float* left, float* right, float spread);
 
   private:
     static float FractionalPart(float value);
@@ -151,16 +154,16 @@ class TremoloEngine
     int   division_;
 
     float targetDepth_;
-    float targetOffset_;
+    float targetSpread_;
     float targetModAmount_;
 
     float smoothedDepth_;
-    float smoothedOffset_;
+    float smoothedSpread_;
     float smoothedModAmount_;
     float smoothedGainL_;
     float smoothedGainR_;
     float effectiveDepth_;
-    float effectiveOffset_;
+    float effectiveSpread_;
     float effectiveRate_;
 
     int shape_;
