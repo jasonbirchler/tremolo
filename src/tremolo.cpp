@@ -38,6 +38,19 @@ static void TriggerLed2Pulse(uint32_t nowMs)
     led2PulseUntil = nowMs + 60;
 }
 
+// Exponential mapping for the Spread (Phase Offset) knob. Control is subtle
+// near zero and becomes more rapid toward full scale, giving finer tactile
+// resolution over small phase shifts.
+static float SpreadFromKnob(float knob)
+{
+    const float kCurve = 3.0f;
+    if(knob <= 0.0f)
+        return 0.0f;
+    if(knob >= 1.0f)
+        return 1.0f;
+    return (expf(kCurve * knob) - 1.0f) / (expf(kCurve) - 1.0f);
+}
+
 void updateSwitch1() // left = sine, center = saw, right = square
 {
     if(pswitch1[0] == true)
@@ -135,7 +148,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         TremoloEngine::DivisionFromKnob(vparam1, engine.GetDivision()));
     engine.SetDepth(vparam2);
     engine.SetShape(TremoloEngine::ShapeFromKnob(vparam3, engine.GetShape()));
-    engine.SetSpread(vparam4);
+    engine.SetSpread(SpreadFromKnob(vparam4));
     engine.SetModAmount(vparam5);
     engine.SetModRate(vparam6);
     engine.SetBypassed(bypassed);
