@@ -51,12 +51,12 @@ static float SpreadFromKnob(float knob)
     return (expf(kCurve * knob) - 1.0f) / (expf(kCurve) - 1.0f);
 }
 
-void updateSwitch1() // left = sine, center = saw, right = square
+void updateSwitch1() // left = sine, center = sawtooth, right = reverse sawtooth
 {
     if(pswitch1[0] == true)
         engine.SetModWaveform(TremoloEngine::MOD_SINE);
     else if(pswitch1[1] == true)
-        engine.SetModWaveform(TremoloEngine::MOD_SQUARE);
+        engine.SetModWaveform(TremoloEngine::MOD_REVERSE_SAW);
     else
         engine.SetModWaveform(TremoloEngine::MOD_SAW);
 }

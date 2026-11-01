@@ -29,7 +29,7 @@ float ModWaveformValue(int waveform, float phase)
     switch(waveform)
     {
         case TremoloEngine::MOD_SAW: return 2.0f * phase - 1.0f;
-        case TremoloEngine::MOD_SQUARE: return phase < 0.5f ? 1.0f : -1.0f;
+        case TremoloEngine::MOD_REVERSE_SAW: return 1.0f - 2.0f * phase;
         case TremoloEngine::MOD_SINE:
         default: return sinf(kTwoPi * phase);
     }

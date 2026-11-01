@@ -99,7 +99,7 @@ class TremoloEngine
     {
         MOD_SINE = 0,
         MOD_SAW,
-        MOD_SQUARE,
+        MOD_REVERSE_SAW,
         MOD_COUNT
     };
 

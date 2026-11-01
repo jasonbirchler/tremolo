@@ -338,14 +338,14 @@ static void TestModulationClamps()
     TremoloEngine engine;
     engine.Init(48000.0f);
     engine.SetBypassed(false);
-    engine.SetTempo(300.0f);
+    engine.SetTempo(30.0f); // 0.5 Hz primary
     engine.SetDivision(TremoloEngine::DIV_QUARTER);
     engine.SetDepth(0.9f);
     engine.SetShape(TremoloEngine::WAVE_SINE);
     engine.SetSpread(0.0f);
     engine.SetModAmount(1.0f);
-    engine.SetModRate(0.0f);
-    engine.SetModWaveform(TremoloEngine::MOD_SQUARE);
+    engine.SetModRate(0.5f); // Multiplier 1.0, so 0.5 Hz modulation LFO
+    engine.SetModWaveform(TremoloEngine::MOD_REVERSE_SAW);
     engine.SetModTarget(TremoloEngine::TARGET_DEPTH);
 
     Warmup(engine, 8192, 0.75f, 0.75f);
@@ -353,13 +353,15 @@ static void TestModulationClamps()
     float outL = 0.0f;
     float outR = 0.0f;
 
-    // Wait for the negative half of the square modulation LFO. The effective
-    // depth (0.9 - 1.0) must clamp to zero, giving unity gain.
+    // The reverse sawtooth ramps from +1 at phase 0 to -1 at phase 1. With
+    // depth 0.9 and mod amount 1.0, the effective depth is driven to zero once
+    // phase >= 0.95. At 0.5 Hz the last 5% of the cycle lasts 4800 samples,
+    // which is long enough for the 5 ms depth smoothing to settle.
     bool foundNegativeHalf = false;
-    for(int i = 0; i < 200000; ++i)
+    for(int i = 0; i < 500000; ++i)
     {
         engine.Process(0.75f, 0.75f, &outL, &outR);
-        if(engine.GetSecondaryPhase() > 0.55f)
+        if(engine.GetSecondaryPhase() > 0.95f)
         {
             foundNegativeHalf = true;
             break;
@@ -367,12 +369,14 @@ static void TestModulationClamps()
     }
     CHECK(foundNegativeHalf);
 
-    for(int i = 0; i < 2048; ++i)
-    {
+    // Let the effective depth and gain smoothing settle. This advances the
+    // phase by ~0.025, so it stays below 1.0 and inside the clamped region.
+    for(int i = 0; i < 2400; ++i)
         engine.Process(0.75f, 0.75f, &outL, &outR);
-        CHECK_NEAR(outL, 0.75f, 1e-4);
-        CHECK_NEAR(outR, 0.75f, 1e-4);
-    }
+
+    CHECK(engine.GetSecondaryPhase() < 1.0f);
+    CHECK_NEAR(outL, 0.75f, 1e-4);
+    CHECK_NEAR(outR, 0.75f, 1e-4);
 }
 
 static void CheckRateTarget(int target)
@@ -385,15 +389,22 @@ static void CheckRateTarget(int target)
     engine.SetTempo(60.0f);
     engine.SetDivision(TremoloEngine::DIV_QUARTER);
     engine.SetModAmount(1.0f);
-    engine.SetModWaveform(TremoloEngine::MOD_SQUARE);
+    engine.SetModRate(0.0f); // Slowest LFO, so the mod value is near constant
+    engine.SetModWaveform(TremoloEngine::MOD_REVERSE_SAW);
     engine.SetModTarget(target);
 
     float outL = 0.0f;
     float outR = 0.0f;
 
-    // The secondary LFO starts at phase 0, so its first half is +1 and the
-    // rate should settle at 2x.
-    while(engine.GetSecondaryPhase() < 0.1f)
+    Warmup(engine, 8192, 1.0f, 1.0f);
+
+    // The reverse sawtooth ramps from +1 at phase 0 down to -1 at phase 1.
+    // The modulation LFO is 1/32 Hz, so over the 0.1 s measurement window the
+    // mod value moves by less than 0.01 and the rate is effectively constant.
+
+    // Wait until the secondary phase wraps back to near zero, where the mod
+    // value is +1 and the rate should settle at 2x.
+    while(engine.GetSecondaryPhase() > 0.005f)
         engine.Process(1.0f, 1.0f, &outL, &outR);
     for(int i = 0; i < 2400; ++i) // Let the 5 ms rate smoothing settle.
         engine.Process(1.0f, 1.0f, &outL, &outR);
@@ -405,14 +416,15 @@ static void CheckRateTarget(int target)
     if(fastDelta < 0.0f)
         fastDelta += 1.0f;
 
-    // The second half is -1, so the rate should settle at 0.5x.
-    while(engine.GetSecondaryPhase() < 0.6f)
+    // Now wait for the secondary phase to approach 1, where the mod value is
+    // -1 and the rate should settle at 0.5x.
+    while(engine.GetSecondaryPhase() < 0.995f)
         engine.Process(1.0f, 1.0f, &outL, &outR);
     for(int i = 0; i < 2400; ++i)
         engine.Process(1.0f, 1.0f, &outL, &outR);
 
     const float slowStart = engine.GetPrimaryPhase();
-    for(int i = 0; i < 4800; ++i)
+    for(int i = 0; i < 4800; ++i) // 0.1 s
         engine.Process(1.0f, 1.0f, &outL, &outR);
     float slowDelta = engine.GetPrimaryPhase() - slowStart;
     if(slowDelta < 0.0f)
