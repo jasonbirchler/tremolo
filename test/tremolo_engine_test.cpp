@@ -620,6 +620,87 @@ static void TestGainCompensation()
     CHECK_NEAR(outR, 0.25f * gain, 1e-4);
 }
 
+static void TestMidiCcMapping()
+{
+    MidiCcController midi;
+
+    // Nothing is overridden until a mapped CC arrives.
+    for(int i = 0; i < MidiCcController::KNOB_COUNT; ++i)
+        CHECK(!midi.KnobOverridden(i));
+    for(int i = 0; i < MidiCcController::SWITCH_COUNT; ++i)
+        CHECK(!midi.SwitchOverridden(i));
+    for(int i = 0; i < MidiCcController::FOOTSWITCH_COUNT; ++i)
+        CHECK(!midi.FootswitchOverridden(i));
+
+    // Knob 1..6 map to CC 21..26 and scale 0..127 to 0..1.
+    for(int i = 0; i < MidiCcController::KNOB_COUNT; ++i)
+    {
+        CHECK(midi.ControlChange(21 + i, 127));
+        CHECK(midi.KnobOverridden(i));
+        CHECK_NEAR(midi.KnobValue(i), 1.0f, 1e-6);
+    }
+    CHECK(midi.ControlChange(21, 0));
+    CHECK_NEAR(midi.KnobValue(0), 0.0f, 1e-6);
+    CHECK(midi.ControlChange(22, 64));
+    CHECK_NEAR(midi.KnobValue(1), 64.0f / 127.0f, 1e-6);
+
+    // Switch 1..3 map to CC 27..29 across three equal bands.
+    CHECK(midi.ControlChange(27, 0));
+    CHECK(midi.SwitchOverridden(0));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_LEFT);
+    CHECK(midi.ControlChange(27, 42));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_LEFT);
+    CHECK(midi.ControlChange(27, 43));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_CENTER);
+    CHECK(midi.ControlChange(27, 85));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_CENTER);
+    CHECK(midi.ControlChange(27, 86));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_RIGHT);
+    CHECK(midi.ControlChange(27, 127));
+    CHECK(midi.SwitchPosition(0) == MidiCcController::SWITCH_RIGHT);
+
+    CHECK(midi.ControlChange(28, 43));
+    CHECK(midi.SwitchOverridden(1));
+    CHECK(midi.SwitchPosition(1) == MidiCcController::SWITCH_CENTER);
+    CHECK(midi.ControlChange(29, 86));
+    CHECK(midi.SwitchOverridden(2));
+    CHECK(midi.SwitchPosition(2) == MidiCcController::SWITCH_RIGHT);
+
+    // Footswitch 1 and 2 map to CC 30 and 31, pressed at value 64.
+    CHECK(midi.ControlChange(30, 63));
+    CHECK(midi.FootswitchOverridden(0));
+    CHECK(!midi.FootswitchPressed(0));
+    CHECK(midi.ControlChange(30, 64));
+    CHECK(midi.FootswitchPressed(0));
+    CHECK(midi.ControlChange(31, 127));
+    CHECK(midi.FootswitchOverridden(1));
+    CHECK(midi.FootswitchPressed(1));
+
+    // Unmapped controllers are ignored.
+    CHECK(!midi.ControlChange(20, 127));
+    CHECK(!midi.ControlChange(32, 127));
+    CHECK(!midi.ControlChange(0, 127));
+    CHECK(!midi.ControlChange(64, 127));
+
+    // Releasing an override hands control back to the hardware.
+    midi.ReleaseKnob(0);
+    CHECK(!midi.KnobOverridden(0));
+    CHECK(midi.KnobOverridden(1));
+    midi.ReleaseSwitch(2);
+    CHECK(!midi.SwitchOverridden(2));
+    CHECK(midi.SwitchOverridden(0));
+    midi.ReleaseFootswitch(0);
+    CHECK(!midi.FootswitchOverridden(0));
+    CHECK(midi.FootswitchOverridden(1));
+
+    // Out-of-range indexes are harmless.
+    midi.ReleaseKnob(-1);
+    midi.ReleaseKnob(MidiCcController::KNOB_COUNT);
+    CHECK(!midi.KnobOverridden(-1));
+    CHECK(!midi.SwitchOverridden(MidiCcController::SWITCH_COUNT));
+    CHECK(!midi.FootswitchOverridden(MidiCcController::FOOTSWITCH_COUNT));
+}
+
 int main()
 {
     TestDepthZeroIsUnity();
@@ -637,6 +718,7 @@ int main()
     TestTempoSelection();
     TestEnvelopeRetrigger();
     TestGainCompensation();
+    TestMidiCcMapping();
 
     if(failures == 0)
     {

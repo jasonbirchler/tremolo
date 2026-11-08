@@ -152,6 +152,124 @@ bool MidiClockTempo::IsActive(uint32_t nowMs) const
     return (nowMs - lastClockMs_) < kTimeoutMs;
 }
 
+void MidiCcController::Reset()
+{
+    for(int i = 0; i < KNOB_COUNT; ++i)
+    {
+        knobOverridden_[i] = false;
+        knobValue_[i]      = 0.0f;
+    }
+    for(int i = 0; i < SWITCH_COUNT; ++i)
+    {
+        switchOverridden_[i] = false;
+        switchPosition_[i]   = SWITCH_CENTER;
+    }
+    for(int i = 0; i < FOOTSWITCH_COUNT; ++i)
+    {
+        footswitchOverridden_[i] = false;
+        footswitchPressed_[i]    = false;
+    }
+}
+
+int MidiCcController::SwitchPositionFromValue(uint8_t value)
+{
+    if(value <= 42)
+        return SWITCH_LEFT;
+    if(value <= 85)
+        return SWITCH_CENTER;
+    return SWITCH_RIGHT;
+}
+
+bool MidiCcController::ControlChange(uint8_t control, uint8_t value)
+{
+    if(control >= KNOB_1_CC && control < KNOB_1_CC + KNOB_COUNT)
+    {
+        const int index        = control - KNOB_1_CC;
+        knobOverridden_[index] = true;
+        knobValue_[index]      = static_cast<float>(value) / 127.0f;
+        return true;
+    }
+
+    if(control >= SWITCH_1_CC && control < SWITCH_1_CC + SWITCH_COUNT)
+    {
+        const int index          = control - SWITCH_1_CC;
+        switchOverridden_[index] = true;
+        switchPosition_[index]   = SwitchPositionFromValue(value);
+        return true;
+    }
+
+    if(control >= FOOTSWITCH_1_CC
+       && control < FOOTSWITCH_1_CC + FOOTSWITCH_COUNT)
+    {
+        const int index              = control - FOOTSWITCH_1_CC;
+        footswitchOverridden_[index] = true;
+        footswitchPressed_[index]    = value >= 64;
+        return true;
+    }
+
+    return false;
+}
+
+bool MidiCcController::KnobOverridden(int index) const
+{
+    if(index < 0 || index >= KNOB_COUNT)
+        return false;
+    return knobOverridden_[index];
+}
+
+float MidiCcController::KnobValue(int index) const
+{
+    if(index < 0 || index >= KNOB_COUNT)
+        return 0.0f;
+    return knobValue_[index];
+}
+
+bool MidiCcController::SwitchOverridden(int index) const
+{
+    if(index < 0 || index >= SWITCH_COUNT)
+        return false;
+    return switchOverridden_[index];
+}
+
+int MidiCcController::SwitchPosition(int index) const
+{
+    if(index < 0 || index >= SWITCH_COUNT)
+        return SWITCH_CENTER;
+    return switchPosition_[index];
+}
+
+bool MidiCcController::FootswitchOverridden(int index) const
+{
+    if(index < 0 || index >= FOOTSWITCH_COUNT)
+        return false;
+    return footswitchOverridden_[index];
+}
+
+bool MidiCcController::FootswitchPressed(int index) const
+{
+    if(index < 0 || index >= FOOTSWITCH_COUNT)
+        return false;
+    return footswitchPressed_[index];
+}
+
+void MidiCcController::ReleaseKnob(int index)
+{
+    if(index >= 0 && index < KNOB_COUNT)
+        knobOverridden_[index] = false;
+}
+
+void MidiCcController::ReleaseSwitch(int index)
+{
+    if(index >= 0 && index < SWITCH_COUNT)
+        switchOverridden_[index] = false;
+}
+
+void MidiCcController::ReleaseFootswitch(int index)
+{
+    if(index >= 0 && index < FOOTSWITCH_COUNT)
+        footswitchOverridden_[index] = false;
+}
+
 void TremoloEngine::Init(float sampleRate)
 {
     sampleRate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
