@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include "Utility/delayline.h"
+#include "Synthesis/oscillator.h"
 
 // Modulated-delay vibrato. The LFO rate is supplied by the caller so it can be
 // locked to the tremolo engine's modulation LFO.
@@ -27,9 +28,9 @@ class Vibrato
     float ProcessLfo();
 
     float sampleRate_;
-    float lfoPhase_;
-    float lfoIncrement_;
     float lfoDepth_;
+
+    daisysp::Oscillator lfo_;
 
     float baseDelaySamples_;
     float modRangeSamples_;

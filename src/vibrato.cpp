@@ -11,9 +11,12 @@ void Vibrato::Init(float sampleRate)
     baseDelaySamples_ = kBaseDelayMs * 0.001f * sampleRate_;
     modRangeSamples_  = kMaxModDelayMs * 0.001f * sampleRate_;
 
-    lfoPhase_     = 0.0f;
-    lfoIncrement_ = 0.0f;
     lfoDepth_     = 0.5f;
+
+    lfo_.Init(sampleRate_);
+    lfo_.SetWaveform(daisysp::Oscillator::WAVE_SIN);
+    lfo_.SetAmp(1.0f);
+    lfo_.SetFreq(0.0f);
 
     delay_.Init();
     delay_.SetDelay(baseDelaySamples_);
@@ -39,7 +42,7 @@ float Vibrato::Process(float in)
 void Vibrato::SetLfoFreq(float freq)
 {
     freq = daisysp::fclamp(freq, 0.0f, sampleRate_ * 0.5f);
-    lfoIncrement_ = freq / sampleRate_;
+    lfo_.SetFreq(freq);
 }
 
 void Vibrato::SetLfoDepth(float depth)
@@ -49,11 +52,5 @@ void Vibrato::SetLfoDepth(float depth)
 
 float Vibrato::ProcessLfo()
 {
-    const float value = sinf(TWOPI_F * lfoPhase_);
-
-    lfoPhase_ += lfoIncrement_;
-    if(lfoPhase_ >= 1.0f)
-        lfoPhase_ = daisysp::fastmod1f(lfoPhase_);
-
-    return value;
+    return lfo_.Process();
 }
