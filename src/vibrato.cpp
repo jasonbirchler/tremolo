@@ -2,19 +2,7 @@
 
 #include <cmath>
 
-namespace
-{
-constexpr float kTwoPi = 6.28318530717958647692f;
-
-float ClampFloat(float value, float low, float high)
-{
-    if(value < low)
-        return low;
-    if(value > high)
-        return high;
-    return value;
-}
-} // namespace
+#include "Utility/dsp.h"
 
 void Vibrato::Init(float sampleRate)
 {
@@ -37,9 +25,9 @@ float Vibrato::Process(float in)
 
     float delaySamples
         = baseDelaySamples_ + lfoDepth_ * modRangeSamples_ * lfo;
-    delaySamples = ClampFloat(delaySamples,
-                              1.0f,
-                              static_cast<float>(kDelayLength - 2));
+    delaySamples = daisysp::fclamp(delaySamples,
+                                   1.0f,
+                                   static_cast<float>(kDelayLength - 2));
 
     delay_.SetDelay(delaySamples);
     const float out = delay_.Read();
@@ -50,22 +38,22 @@ float Vibrato::Process(float in)
 
 void Vibrato::SetLfoFreq(float freq)
 {
-    freq = ClampFloat(freq, 0.0f, sampleRate_ * 0.5f);
+    freq = daisysp::fclamp(freq, 0.0f, sampleRate_ * 0.5f);
     lfoIncrement_ = freq / sampleRate_;
 }
 
 void Vibrato::SetLfoDepth(float depth)
 {
-    lfoDepth_ = ClampFloat(depth, 0.0f, 1.0f);
+    lfoDepth_ = daisysp::fclamp(depth, 0.0f, 1.0f);
 }
 
 float Vibrato::ProcessLfo()
 {
-    const float value = sinf(kTwoPi * lfoPhase_);
+    const float value = sinf(TWOPI_F * lfoPhase_);
 
     lfoPhase_ += lfoIncrement_;
     if(lfoPhase_ >= 1.0f)
-        lfoPhase_ -= floorf(lfoPhase_);
+        lfoPhase_ = daisysp::fastmod1f(lfoPhase_);
 
     return value;
 }

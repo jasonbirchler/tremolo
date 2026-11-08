@@ -53,5 +53,5 @@ test: $(TEST_BIN)
 
 $(TEST_BIN): $(TEST_SRC) src/tremolo_engine.h
 	@mkdir -p $(TEST_DIR)
-	$(HOST_CXX) -std=c++14 -O2 -Wall -Wextra -Isrc \
+	$(HOST_CXX) -std=c++14 -O2 -Wall -Wextra -Isrc -I$(DAISYSP_DIR)/Source \
 		$(TEST_SRC) -o $@

@@ -2,9 +2,14 @@
 
 #include <cmath>
 
+#include "Utility/dsp.h"
+
 namespace
 {
-const float kTwoPi = 6.28318530717958647692f;
+using daisysp::fastmod1f;
+using daisysp::fclamp;
+using daisysp::fonepole;
+
 const float kSmoothingSeconds = 0.005f;
 const float kGainSmoothingSeconds = 0.001f;
 const float kMinBpm = 30.0f;
@@ -20,15 +25,6 @@ const float kEnvelopeRearmRatio = 0.7f;
 const float kDefaultRetriggerThreshold = 0.75f;
 const float kMaxGainCompensationDb = 2.0f;
 
-float ClampFloat(float value, float low, float high)
-{
-    if(value < low)
-        return low;
-    if(value > high)
-        return high;
-    return value;
-}
-
 float ModWaveformValue(int waveform, float phase)
 {
     switch(waveform)
@@ -36,7 +32,7 @@ float ModWaveformValue(int waveform, float phase)
         case TremoloEngine::MOD_SAW: return 2.0f * phase - 1.0f;
         case TremoloEngine::MOD_REVERSE_SAW: return 1.0f - 2.0f * phase;
         case TremoloEngine::MOD_SINE:
-        default: return sinf(kTwoPi * phase);
+        default: return sinf(TWOPI_F * phase);
     }
 }
 } // namespace
@@ -78,7 +74,7 @@ void TapTempo::Tap(uint32_t nowMs)
             {
                 const float average = static_cast<float>(sum)
                                       / static_cast<float>(count_);
-                bpm_ = ClampFloat(60000.0f / average, kMinBpm, kMaxBpm);
+                bpm_ = fclamp(60000.0f / average, kMinBpm, kMaxBpm);
             }
         }
     }
@@ -141,7 +137,7 @@ void MidiClockTempo::Tick(uint32_t nowMs)
     {
         const float average = static_cast<float>(sum)
                               / static_cast<float>(kHistory);
-        bpm_ = ClampFloat(60000.0f / (average * 24.0f), kMinBpm, kMaxBpm);
+        bpm_ = fclamp(60000.0f / (average * 24.0f), kMinBpm, kMaxBpm);
     }
 }
 
@@ -209,14 +205,14 @@ void TremoloEngine::Reset()
     randomLeft_   = NextRandom();
     randomRight_  = NextRandom();
 
-    previousRightPhase_ = FractionalPart(smoothedSpread_ * kSpreadPhaseCycles);
+    previousRightPhase_ = fastmod1f(smoothedSpread_ * kSpreadPhaseCycles);
 
     mix_ = bypassed_ ? 0.0f : 1.0f;
 }
 
 void TremoloEngine::SetTempo(float bpm)
 {
-    targetTempo_ = ClampFloat(bpm, kMinBpm, kMaxBpm);
+    targetTempo_ = fclamp(bpm, kMinBpm, kMaxBpm);
 }
 
 void TremoloEngine::SetDivision(int division)
@@ -300,8 +296,7 @@ void TremoloEngine::SetVibratoOrder(int order)
 
 void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 {
-    smoothedInputGain_
-        += gainCoefficient_ * (targetInputGain_ - smoothedInputGain_);
+    fonepole(smoothedInputGain_, targetInputGain_, gainCoefficient_);
     inL *= smoothedInputGain_;
     inR *= smoothedInputGain_;
 
@@ -311,15 +306,11 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
     const float targetModRate
         = PrimaryFrequency(targetTempo_, division_) * targetModMultiplier_;
 
-    smoothedDepth_
-        += parameterCoefficient_ * (targetDepth_ - smoothedDepth_);
-    smoothedSpread_
-        += parameterCoefficient_ * (targetSpread_ - smoothedSpread_);
-    smoothedModAmount_
-        += parameterCoefficient_ * (targetModAmount_ - smoothedModAmount_);
-    smoothedModRate_
-        += parameterCoefficient_ * (targetModRate - smoothedModRate_);
-    mix_ += mixCoefficient_ * (targetMix - mix_);
+    fonepole(smoothedDepth_, targetDepth_, parameterCoefficient_);
+    fonepole(smoothedSpread_, targetSpread_, parameterCoefficient_);
+    fonepole(smoothedModAmount_, targetModAmount_, parameterCoefficient_);
+    fonepole(smoothedModRate_, targetModRate, parameterCoefficient_);
+    fonepole(mix_, targetMix, mixCoefficient_);
 
     const float secondaryIncrement = smoothedModRate_ / sampleRate_;
 
@@ -348,12 +339,9 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 
     // Smooth the effective values too, so changing the modulation target or
     // hitting a square modulation edge does not produce a click.
-    effectiveDepth_
-        += parameterCoefficient_ * (depthEff - effectiveDepth_);
-    effectiveSpread_
-        += parameterCoefficient_ * (spreadEff - effectiveSpread_);
-    effectiveRate_
-        += parameterCoefficient_ * (rateScale - effectiveRate_);
+    fonepole(effectiveDepth_, depthEff, parameterCoefficient_);
+    fonepole(effectiveSpread_, spreadEff, parameterCoefficient_);
+    fonepole(effectiveRate_, rateScale, parameterCoefficient_);
 
     depthEff  = effectiveDepth_;
     spreadEff = effectiveSpread_;
@@ -364,18 +352,18 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 
     const float phaseL = primaryPhase_;
     const float phaseR
-        = FractionalPart(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
+        = fastmod1f(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
 
     const float lfoL = WaveformValue(shape_, phaseL, randomLeft_);
     const float lfoR = WaveformValue(shape_, phaseR, randomRight_);
 
-    const float targetGainL = ClampFloat(
+    const float targetGainL = fclamp(
         1.0f - depthEff * (1.0f - lfoL) * 0.5f, 0.0f, 1.0f);
-    const float targetGainR = ClampFloat(
+    const float targetGainR = fclamp(
         1.0f - depthEff * (1.0f - lfoR) * 0.5f, 0.0f, 1.0f);
 
-    smoothedGainL_ += gainCoefficient_ * (targetGainL - smoothedGainL_);
-    smoothedGainR_ += gainCoefficient_ * (targetGainR - smoothedGainR_);
+    fonepole(smoothedGainL_, targetGainL, gainCoefficient_);
+    fonepole(smoothedGainR_, targetGainR, gainCoefficient_);
 
     const float gainL = smoothedGainL_;
     const float gainR = smoothedGainR_;
@@ -402,7 +390,7 @@ void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
         secondaryPhase_ -= floorf(secondaryPhase_);
 
     const float nextRightPhase
-        = FractionalPart(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
+        = fastmod1f(primaryPhase_ + spreadEff * kSpreadPhaseCycles);
     if(nextRightPhase < previousRightPhase_)
         randomRight_ = NextRandom();
 }
@@ -416,7 +404,7 @@ void TremoloEngine::UpdateEnvelope(float inL, float inR)
     const float coefficient
         = amplitude > envelope_ ? envelopeAttackCoefficient_
                                 : envelopeReleaseCoefficient_;
-    envelope_ += coefficient * (amplitude - envelope_);
+    fonepole(envelope_, amplitude, coefficient);
 
     if(!retriggerEnabled_)
         return;
@@ -447,12 +435,12 @@ void TremoloEngine::RestartPrimaryLfo()
 
 float TremoloEngine::Clamp01(float value)
 {
-    return ClampFloat(value, 0.0f, 1.0f);
+    return fclamp(value, 0.0f, 1.0f);
 }
 
 float TremoloEngine::InputGainFromKnob(float knob)
 {
-    const float decibels = Clamp01(knob) * kMaxGainCompensationDb;
+    const float decibels = fclamp(knob, 0.0f, 1.0f) * kMaxGainCompensationDb;
     return powf(10.0f, decibels / 20.0f);
 }
 
@@ -512,19 +500,19 @@ int TremoloEngine::DivisionFromKnob(float knob, int currentDivision)
 float TremoloEngine::WaveformValue(int waveform, float phase,
                                    float randomValue)
 {
-    const float p = FractionalPart(phase);
+    const float p = fastmod1f(phase);
 
     switch(waveform)
     {
         case WAVE_TRIANGLE:
             return 1.0f
-                   - 4.0f * fabsf(FractionalPart(p + 0.25f) - 0.5f);
+                   - 4.0f * fabsf(fastmod1f(p + 0.25f) - 0.5f);
         case WAVE_SAW: return 2.0f * p - 1.0f;
         case WAVE_REVERSE_SAW: return 1.0f - 2.0f * p;
         case WAVE_SQUARE: return p < 0.5f ? 1.0f : -1.0f;
         case WAVE_RANDOM: return randomValue;
         case WAVE_SINE:
-        default: return sinf(kTwoPi * p);
+        default: return sinf(TWOPI_F * p);
     }
 }
 
@@ -558,7 +546,7 @@ float TremoloEngine::SpreadSideGain(float spread)
 {
     // The side level rises logarithmically from unity (equal to mid) at 0 to
     // 1.5x the mid level at full spread.
-    return powf(kSpreadSideMaxGain, Clamp01(spread));
+    return powf(kSpreadSideMaxGain, fclamp(spread, 0.0f, 1.0f));
 }
 
 void TremoloEngine::ApplySpread(float* left, float* right, float spread)
@@ -569,11 +557,6 @@ void TremoloEngine::ApplySpread(float* left, float* right, float spread)
 
     *left  = mid + sideGain * side;
     *right = mid - sideGain * side;
-}
-
-float TremoloEngine::FractionalPart(float value)
-{
-    return value - floorf(value);
 }
 
 uint32_t TremoloEngine::NextRandomBits(uint32_t state)

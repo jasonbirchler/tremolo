@@ -179,7 +179,6 @@ class TremoloEngine
     static void  ApplySpread(float* left, float* right, float spread);
 
   private:
-    static float FractionalPart(float value);
     static uint32_t NextRandomBits(uint32_t state);
     float           NextRandom();
     void            UpdateEnvelope(float inL, float inR);

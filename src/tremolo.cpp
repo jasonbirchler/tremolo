@@ -34,7 +34,6 @@ constexpr float    kDefaultGainCompensation  = 0.0f;
 constexpr float    kKnobPickupTolerance      = 0.02f;
 constexpr float    kPhaserMixSmoothingSeconds = 0.005f;
 constexpr float    kMaxVibratoDepth           = 0.2f;
-constexpr float    kTwoPi                    = 6.28318530717958647692f;
 
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
 // the start of QSPI, so this sector survives normal reflashing and reboots.
@@ -727,7 +726,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     if(calibrationMode && !calibrationFlashActive)
     {
         const float seconds = static_cast<float>(now) * 0.001f;
-        led2Value = 0.5f + 0.5f * sinf(kTwoPi * kCalibrationPulseHz * seconds);
+        led2Value = 0.5f + 0.5f * sinf(TWOPI_F * kCalibrationPulseHz * seconds);
     }
 
     // Rapid four-flash indication if calibration persistence failed.
