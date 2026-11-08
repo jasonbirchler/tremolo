@@ -35,11 +35,9 @@ Stereo tremolo for the GuitarML FunBox v3 (Daisy Seed) platform.
 
 ## Build
 
-The repository expects `libDaisy` and `DaisySP` submodules at the repository root.
+The repository expects `libDaisy` and `DaisySP` submodules at the repository root. Run the top-level build to apply the FunBox hardware patch, build both libraries, and build the firmware:
 
 ```sh
-make -C DaisySP
-make -C libDaisy
 make
 ```
 
@@ -63,13 +61,6 @@ libDaisy or DaisySP dependencies.
 
 ## Required FunBox hardware patch
 
-The `daisy_petal` files in `libDaisy` must be the patched copies from `mod/`.
-If `libDaisy` is updated or re-cloned, copy them again:
+`mod/daisy_petal.h` and `mod/daisy_petal.cpp` are the canonical FunBox patch. The top-level build synchronizes both into `libDaisy/src` and rebuilds the libraries automatically. Use `make patch-libdaisy` to synchronize only, or `make libs` to synchronize and build the libraries.
 
-```sh
-cp mod/daisy_petal.h mod/daisy_petal.cpp libDaisy/src/
-make -C libDaisy
-```
-
-The patch adds the FunBox pin mapping, the six-knob layout, the switches, the
-MIDI UART on `D30`, and `DaisyPetal::InitMidi()`.
+The patch adds the FunBox pin mapping, the six-knob layout, the switches, the MIDI UART on `D30`, and `DaisyPetal::InitMidi()`.
