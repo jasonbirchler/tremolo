@@ -217,8 +217,16 @@ int   lastEffectOrder      = TremoloEngine::EFFECT_ORDER_EFFECT_FIRST;
 bool bypassed  = true;
 uint32_t bypassPressMs = 0;
 
-bool pswitch1[2], pswitch2[2], pswitch3[2], pdip[4];
-int  switch1[2], switch2[2], switch3[2], dip[4];
+bool switch1LeftPressed  = false;
+bool switch1RightPressed = false;
+bool switch2LeftPressed  = false;
+bool switch2RightPressed = false;
+bool switch3LeftPressed  = false;
+bool switch3RightPressed = false;
+bool dipSwitch1On        = false;
+bool dipSwitch2On        = false;
+bool dipSwitch3On        = false;
+bool dipSwitch4On        = false;
 
 Led led1, led2;
 
@@ -280,9 +288,9 @@ static float SpreadFromKnob(float knob)
 
 void updateSwitch1() // left = sine, center = sawtooth, right = reverse sawtooth
 {
-    if(pswitch1[0] == true)
+    if(switch1LeftPressed == true)
         engine.SetModWaveform(TremoloEngine::MOD_SINE);
-    else if(pswitch1[1] == true)
+    else if(switch1RightPressed == true)
         engine.SetModWaveform(TremoloEngine::MOD_REVERSE_SAW);
     else
         engine.SetModWaveform(TremoloEngine::MOD_SAW);
@@ -290,9 +298,9 @@ void updateSwitch1() // left = sine, center = sawtooth, right = reverse sawtooth
 
 void updateSwitch2() // left = depth, center = depth + rate, right = rate
 {
-    if(pswitch2[0] == true)
+    if(switch2LeftPressed == true)
         engine.SetModTarget(TremoloEngine::TARGET_DEPTH);
-    else if(pswitch2[1] == true)
+    else if(switch2RightPressed == true)
         engine.SetModTarget(TremoloEngine::TARGET_RATE);
     else
         engine.SetModTarget(TremoloEngine::TARGET_DEPTH_RATE);
@@ -300,9 +308,9 @@ void updateSwitch2() // left = depth, center = depth + rate, right = rate
 
 void updateSwitch3()
 {
-    if(pswitch3[0] == true)
+    if(switch3LeftPressed == true)
         engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_EFFECT_FIRST);
-    else if(pswitch3[1] == true)
+    else if(switch3RightPressed == true)
         engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_TREMOLO_FIRST);
     else
         engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_OFF);
@@ -418,28 +426,30 @@ void UpdateButtons()
 void UpdateSwitches()
 {
     // 3-way Switch 1 (apply every block so the startup position is honoured)
-    for(int i = 0; i < 2; i++)
-        pswitch1[i] = hw.switches[switch1[i]].Pressed();
+    switch1LeftPressed = hw.switches[Funbox::SWITCH_1_LEFT].Pressed();
+    switch1RightPressed = hw.switches[Funbox::SWITCH_1_RIGHT].Pressed();
     updateSwitch1();
 
     // 3-way Switch 2
-    for(int i = 0; i < 2; i++)
-        pswitch2[i] = hw.switches[switch2[i]].Pressed();
+    switch2LeftPressed = hw.switches[Funbox::SWITCH_2_LEFT].Pressed();
+    switch2RightPressed = hw.switches[Funbox::SWITCH_2_RIGHT].Pressed();
     updateSwitch2();
 
     // 3-way Switch 3 selects the phaser or vibrato order (left, center = off,
     // right). DIP 3 chooses which effect the switch controls.
-    for(int i = 0; i < 2; i++)
-        pswitch3[i] = hw.switches[switch3[i]].Pressed();
+    switch3LeftPressed = hw.switches[Funbox::SWITCH_3_LEFT].Pressed();
+    switch3RightPressed = hw.switches[Funbox::SWITCH_3_RIGHT].Pressed();
     updateSwitch3();
 
     // DIP switches; DIP 1 selects mono (off) or stereo (on) input.
     // DIP 2 enables envelope-triggered LED blink mode.
     // DIP 3 selects phaser (on) or vibrato (off) routing for Switch 3.
-    for(int i = 0; i < 4; i++)
-        pdip[i] = hw.switches[dip[i]].Pressed();
+    dipSwitch1On = hw.switches[Funbox::SWITCH_DIP_1].Pressed();
+    dipSwitch2On = hw.switches[Funbox::SWITCH_DIP_2].Pressed();
+    dipSwitch3On = hw.switches[Funbox::SWITCH_DIP_3].Pressed();
+    dipSwitch4On = hw.switches[Funbox::SWITCH_DIP_4].Pressed();
 
-    envelopeBlinkEnabled = pdip[1];
+    envelopeBlinkEnabled = dipSwitch2On;
 }
 
 static void AudioCallback(AudioHandle::InputBuffer  in,
@@ -508,7 +518,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
                                                  : envelopeThreshold);
     engine.SetGainCompensation(gainCompensation);
     engine.SetBypassed(bypassed);
-    engine.SetRetriggerEnabled(pdip[1]);
+    engine.SetRetriggerEnabled(dipSwitch2On);
 
     // Drain MIDI input each block. Listen() also restarts the UART receiver if
     // it stopped after an overrun.
@@ -525,7 +535,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     engine.SetTempo(bpm);
 
     const float sampleRate = engine.GetSampleRate();
-    const bool  stereo     = pdip[0];
+    const bool  stereo     = dipSwitch1On;
 
     const float modRate = engine.GetModRate();
     for(size_t channel = 0; channel < 2; ++channel)
@@ -539,7 +549,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     for(size_t channel = 0; channel < 2; ++channel)
         vibrato[channel].SetLfoDepth(vibratoDepth);
 
-    const bool phaserMode = pdip[2];
+    const bool phaserMode = dipSwitch3On;
     const int  effectOrder = engine.GetEffectOrder();
     if(effectOrder != TremoloEngine::EFFECT_ORDER_OFF)
         lastEffectOrder = effectOrder;
@@ -729,26 +739,6 @@ int main(void)
     const float samplerate = hw.AudioSampleRate();
     effectMixCoefficient
         = 1.0f - expf(-1.0f / (kEffectMixSmoothingSeconds * samplerate));
-
-    switch1[0] = Funbox::SWITCH_1_LEFT;
-    switch1[1] = Funbox::SWITCH_1_RIGHT;
-    switch2[0] = Funbox::SWITCH_2_LEFT;
-    switch2[1] = Funbox::SWITCH_2_RIGHT;
-    switch3[0] = Funbox::SWITCH_3_LEFT;
-    switch3[1] = Funbox::SWITCH_3_RIGHT;
-    dip[0]     = Funbox::SWITCH_DIP_1;
-    dip[1]     = Funbox::SWITCH_DIP_2;
-    dip[2]     = Funbox::SWITCH_DIP_3;
-    dip[3]     = Funbox::SWITCH_DIP_4;
-
-    for(int i = 0; i < 2; i++)
-    {
-        pswitch1[i] = false;
-        pswitch2[i] = false;
-        pswitch3[i] = false;
-    }
-    for(int i = 0; i < 4; i++)
-        pdip[i] = false;
 
     param1.Init(hw.knob[Funbox::KNOB_1], 0.0f, 1.0f, Parameter::LINEAR);
     param2.Init(hw.knob[Funbox::KNOB_2], 0.0f, 1.0f, Parameter::LINEAR);
