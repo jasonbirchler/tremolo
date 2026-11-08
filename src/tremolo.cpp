@@ -33,6 +33,7 @@ constexpr float    kDefaultEnvelopeThreshold = 0.5f;
 constexpr float    kDefaultGainCompensation  = 0.0f;
 constexpr float    kKnobPickupTolerance      = 0.02f;
 constexpr float    kPhaserMixSmoothingSeconds = 0.005f;
+constexpr float    kMaxVibratoDepth           = 0.2f;
 constexpr float    kTwoPi                    = 6.28318530717958647692f;
 
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
@@ -531,6 +532,13 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     vibratoL.SetLfoFreq(modRate);
     vibratoR.SetLfoFreq(modRate);
 
+    // The vibrato depth is inversely proportional to the tremolo depth: more
+    // tremolo leaves less vibrato, and full tremolo disables it entirely.
+    const float vibratoDepth
+        = kMaxVibratoDepth * (1.0f - engine.GetDepth());
+    vibratoL.SetLfoDepth(vibratoDepth);
+    vibratoR.SetLfoDepth(vibratoDepth);
+
     // DIP 3 selects the phaser (on) or vibrato (off) signal path.
     const bool phaserMode = pdip[2];
 
@@ -815,10 +823,10 @@ int main(void)
     phaserR.SetFeedback(0.5f);
 
     vibratoL.Init(samplerate);
-    vibratoL.SetLfoDepth(0.2f);
+    vibratoL.SetLfoDepth(kMaxVibratoDepth);
     vibratoL.SetLfoFreq(engine.GetModRate());
     vibratoR.Init(samplerate);
-    vibratoR.SetLfoDepth(0.2f);
+    vibratoR.SetLfoDepth(kMaxVibratoDepth);
     vibratoR.SetLfoFreq(engine.GetModRate());
 
     hw.InitMidi();

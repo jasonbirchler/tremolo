@@ -155,6 +155,7 @@ class TremoloEngine
     int   GetShape() const { return shape_; }
     int   GetPhaserOrder() const { return phaserOrder_; }
     int   GetVibratoOrder() const { return vibratoOrder_; }
+    float GetDepth() const { return smoothedDepth_; }
     float GetModRate() const { return smoothedModRate_; }
     float GetPrimaryPhase() const { return primaryPhase_; }
     float GetSecondaryPhase() const { return secondaryPhase_; }
