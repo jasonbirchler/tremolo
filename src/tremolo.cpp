@@ -180,6 +180,15 @@ Parameter  param1, param2, param3, param4, param5, param6;
 
 TremoloEngine  engine;
 TempoController tempo;
+daisysp::Phaser phaserL;
+daisysp::Phaser phaserR;
+
+// Smoothly blends the phaser into the signal path so engaging it (via switch
+// 3) or leaving bypass does not click.
+float phaserMix            = 0.0f;
+float phaserMixCoefficient = 0.0f;
+int   lastPhaserOrder
+    = TremoloEngine::PHASER_ORDER_PHASE_FIRST;
 
 bool bypassed  = true;
 uint32_t bypassPressMs = 0;
@@ -265,8 +274,17 @@ void updateSwitch2() // left = depth, center = depth + rate, right = rate
         engine.SetModTarget(TremoloEngine::TARGET_DEPTH_RATE);
 }
 
-void updateSwitch3() // unused
+void updateSwitch3() // phaser
 {
+    if(pswitch3[0] == true)
+        // phase then trem
+        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_PHASE_FIRST);
+    else if(pswitch3[1] == true)
+        // trem then phase
+        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_TREMOLO_FIRST);
+    else
+        // phaser off
+        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_OFF);
 }
 
 static void ToggleCalibration(uint32_t nowMs)
@@ -388,9 +406,10 @@ void UpdateSwitches()
         pswitch2[i] = hw.switches[switch2[i]].Pressed();
     updateSwitch2();
 
-    // 3-way Switch 3 (unused, tracked for completeness)
+    // 3-way Switch 3 selects the phaser order (left, center = off, right)
     for(int i = 0; i < 2; i++)
         pswitch3[i] = hw.switches[switch3[i]].Pressed();
+    updateSwitch3();
 
     // DIP switches; DIP 1 selects mono (off) or stereo (on) input.
     // DIP 2 enables envelope-triggered LED blink mode.
@@ -486,6 +505,16 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = pdip[0];
 
+    const int phaserOrder = engine.GetPhaserOrder();
+    if(phaserOrder != TremoloEngine::PHASER_ORDER_OFF)
+        lastPhaserOrder = phaserOrder;
+
+    // The phaser only runs when switch 3 selects an order and the pedal is
+    // not bypassed. The mix fades in/out so toggling either is click-free.
+    const bool  phaserEngaged
+        = !bypassed && phaserOrder != TremoloEngine::PHASER_ORDER_OFF;
+    const float targetPhaserMix = phaserEngaged ? 1.0f : 0.0f;
+
     for(size_t i = 0; i < size; i++)
     {
         const float inL = in[0][i];
@@ -493,7 +522,34 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
         float outL = inL;
         float outR = inR;
-        engine.Process(inL, inR, &outL, &outR);
+
+        phaserMix += phaserMixCoefficient * (targetPhaserMix - phaserMix);
+
+        if(phaserOrder == TremoloEngine::PHASER_ORDER_OFF
+           && phaserMix < 1.0e-4f)
+        {
+            engine.Process(inL, inR, &outL, &outR);
+        }
+        else if(lastPhaserOrder
+                == TremoloEngine::PHASER_ORDER_PHASE_FIRST)
+        {
+            const float phasedL = phaserL.Process(inL);
+            const float phasedR = phaserR.Process(inR);
+            engine.Process(inL + (phasedL - inL) * phaserMix,
+                           inR + (phasedR - inR) * phaserMix,
+                           &outL, &outR);
+        }
+        else
+        {
+            float tremL = 0.0f;
+            float tremR = 0.0f;
+            engine.Process(inL, inR, &tremL, &tremR);
+
+            const float phasedL = phaserL.Process(tremL);
+            const float phasedR = phaserR.Process(tremR);
+            outL = tremL + (phasedL - tremL) * phaserMix;
+            outR = tremR + (phasedR - tremR) * phaserMix;
+        }
 
         out[0][i] = outL;
         out[1][i] = outR;
@@ -632,6 +688,8 @@ int main(void)
     saveGainValue            = settings.gain;
 
     const float samplerate = hw.AudioSampleRate();
+    phaserMixCoefficient
+        = 1.0f - expf(-1.0f / (kPhaserMixSmoothingSeconds * samplerate));
 
     switch1[0] = Funbox::SWITCH_1_LEFT;
     switch1[1] = Funbox::SWITCH_1_RIGHT;
@@ -671,6 +729,17 @@ int main(void)
     engine.Init(samplerate);
     engine.SetBypassed(true);
     engine.SetGainCompensation(gainCompensation);
+
+    phaserL.Init(samplerate);
+    phaserL.SetLfoDepth(0.5f);
+    phaserL.SetLfoFreq(0.5f);
+    phaserL.SetPoles(4);
+    phaserL.SetFeedback(0.5f);
+    phaserR.Init(samplerate);
+    phaserR.SetLfoDepth(0.5f);
+    phaserR.SetLfoFreq(0.5f);
+    phaserR.SetPoles(4);
+    phaserR.SetFeedback(0.5f);
 
     hw.InitMidi();
     hw.midi.StartReceive();
