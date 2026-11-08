@@ -505,6 +505,11 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = pdip[0];
 
+    // Lock both phaser LFOs to the modulation LFO rate.
+    const float modRate = engine.GetModRate();
+    phaserL.SetLfoFreq(modRate);
+    phaserR.SetLfoFreq(modRate);
+
     const int phaserOrder = engine.GetPhaserOrder();
     if(phaserOrder != TremoloEngine::PHASER_ORDER_OFF)
         lastPhaserOrder = phaserOrder;
@@ -732,12 +737,12 @@ int main(void)
 
     phaserL.Init(samplerate);
     phaserL.SetLfoDepth(0.5f);
-    phaserL.SetLfoFreq(0.5f);
+    phaserL.SetLfoFreq(engine.GetModRate());
     phaserL.SetPoles(4);
     phaserL.SetFeedback(0.5f);
     phaserR.Init(samplerate);
     phaserR.SetLfoDepth(0.5f);
-    phaserR.SetLfoFreq(0.5f);
+    phaserR.SetLfoFreq(engine.GetModRate());
     phaserR.SetPoles(4);
     phaserR.SetFeedback(0.5f);
 
