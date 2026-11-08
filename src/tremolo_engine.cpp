@@ -18,6 +18,7 @@ const float kEnvelopeAttackSeconds = 0.001f;
 const float kEnvelopeReleaseSeconds = 0.1f;
 const float kEnvelopeRearmRatio = 0.7f;
 const float kDefaultRetriggerThreshold = 0.75f;
+const float kMaxGainCompensationDb = 2.0f;
 
 float ClampFloat(float value, float low, float high)
 {
@@ -173,6 +174,7 @@ void TremoloEngine::Init(float sampleRate)
     targetModMultiplier_ = ModRateMultiplierFromKnob(0.5f);
     modWaveform_         = MOD_SINE;
     modTarget_           = TARGET_DEPTH;
+    targetInputGain_     = 1.0f;
     bypassed_            = true;
 
     retriggerEnabled_    = false;
@@ -192,6 +194,7 @@ void TremoloEngine::Reset()
         = PrimaryFrequency(targetTempo_, division_) * targetModMultiplier_;
     smoothedGainL_ = 1.0f;
     smoothedGainR_ = 1.0f;
+    smoothedInputGain_ = targetInputGain_;
 
     effectiveDepth_  = targetDepth_;
     effectiveSpread_ = targetSpread_;
@@ -252,6 +255,11 @@ void TremoloEngine::SetModRate(float knob)
     targetModMultiplier_ = ModRateMultiplierFromKnob(knob);
 }
 
+void TremoloEngine::SetGainCompensation(float knob)
+{
+    targetInputGain_ = InputGainFromKnob(knob);
+}
+
 void TremoloEngine::SetModWaveform(int waveform)
 {
     if(waveform < 0)
@@ -272,6 +280,11 @@ void TremoloEngine::SetModTarget(int target)
 
 void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)
 {
+    smoothedInputGain_
+        += gainCoefficient_ * (targetInputGain_ - smoothedInputGain_);
+    inL *= smoothedInputGain_;
+    inR *= smoothedInputGain_;
+
     UpdateEnvelope(inL, inR);
 
     const float targetMix = bypassed_ ? 0.0f : 1.0f;
@@ -415,6 +428,12 @@ void TremoloEngine::RestartPrimaryLfo()
 float TremoloEngine::Clamp01(float value)
 {
     return ClampFloat(value, 0.0f, 1.0f);
+}
+
+float TremoloEngine::InputGainFromKnob(float knob)
+{
+    const float decibels = Clamp01(knob) * kMaxGainCompensationDb;
+    return powf(10.0f, decibels / 20.0f);
 }
 
 float TremoloEngine::DivisionMultiplier(int division)

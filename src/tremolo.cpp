@@ -29,34 +29,68 @@ constexpr uint32_t kSaveErrorFlashPeriodMs   = 160;
 constexpr uint32_t kSaveErrorFlashTotalMs    = 640;
 constexpr float    kCalibrationPulseHz       = 1.0f;
 constexpr float    kDefaultEnvelopeThreshold = 0.5f;
+constexpr float    kDefaultGainCompensation  = 0.0f;
+constexpr float    kKnobPickupTolerance      = 0.02f;
+constexpr float    kPhaserMixSmoothingSeconds = 0.005f;
 constexpr float    kTwoPi                    = 6.28318530717958647692f;
 
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
 // the start of QSPI, so this sector survives normal reflashing and reboots.
 constexpr uint32_t kCalibrationStorageAddress = 0x007FF000;
-constexpr uint32_t kCalibrationMagic          = 0x43414C31u; // "CAL1"
-constexpr uint32_t kCalibrationVersion        = 1u;
+constexpr uint32_t kCalibrationMagic          = 0x43414C32u; // "CAL2"
+constexpr uint32_t kCalibrationVersion        = 2u;
+constexpr uint32_t kLegacyCalibrationMagic    = 0x43414C31u; // "CAL1"
+constexpr uint32_t kLegacyCalibrationVersion  = 1u;
 
 struct CalibrationRecord
 {
     uint32_t magic;
     uint32_t version;
     float    threshold;
+    float    gain;
     uint32_t checksum;
 };
-static_assert(sizeof(CalibrationRecord) == 16,
-              "CalibrationRecord must be 16 bytes");
+static_assert(sizeof(CalibrationRecord) == 20,
+              "CalibrationRecord must be 20 bytes");
+
+struct LegacyCalibrationRecord
+{
+    uint32_t magic;
+    uint32_t version;
+    float    threshold;
+    uint32_t checksum;
+};
+static_assert(sizeof(LegacyCalibrationRecord) == 16,
+              "LegacyCalibrationRecord must be 16 bytes");
+
+struct CalibrationSettings
+{
+    float threshold;
+    float gain;
+};
 } // namespace
 
 DaisyPetal hw;
 
 namespace
 {
-uint32_t CalibrationChecksum(const CalibrationRecord& record)
+uint32_t FloatBits(float value)
 {
     uint32_t bits;
-    std::memcpy(&bits, &record.threshold, sizeof(bits));
-    return record.magic ^ record.version ^ bits ^ 0xA5A5A5A5u;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+uint32_t CalibrationChecksum(const CalibrationRecord& record)
+{
+    return record.magic ^ record.version ^ FloatBits(record.threshold)
+           ^ FloatBits(record.gain) ^ 0xA5A5A5A5u;
+}
+
+uint32_t LegacyCalibrationChecksum(const LegacyCalibrationRecord& record)
+{
+    return record.magic ^ record.version ^ FloatBits(record.threshold)
+           ^ 0xA5A5A5A5u;
 }
 
 void InvalidateCalibrationCache()
@@ -66,7 +100,7 @@ void InvalidateCalibrationCache()
     dsy_dma_invalidate_cache_for_buffer(mapped, sizeof(CalibrationRecord));
 }
 
-float LoadCalibrationThreshold()
+CalibrationSettings LoadCalibrationSettings()
 {
     InvalidateCalibrationCache();
 
@@ -76,20 +110,36 @@ float LoadCalibrationThreshold()
                 sizeof(record));
 
     const float threshold = record.threshold;
+    const float gain      = record.gain;
     if(record.magic == kCalibrationMagic
        && record.version == kCalibrationVersion
        && record.checksum == CalibrationChecksum(record)
-       && threshold >= 0.0f && threshold <= 1.0f)
-        return threshold;
+       && threshold >= 0.0f && threshold <= 1.0f
+       && gain >= 0.0f && gain <= 1.0f)
+        return {threshold, gain};
 
-    return kDefaultEnvelopeThreshold;
+    // Preserve the threshold from a record written before gain compensation
+    // was added.
+    LegacyCalibrationRecord legacy;
+    std::memcpy(&legacy,
+                hw.seed.qspi.GetData(kCalibrationStorageAddress),
+                sizeof(legacy));
+    if(legacy.magic == kLegacyCalibrationMagic
+       && legacy.version == kLegacyCalibrationVersion
+       && legacy.checksum == LegacyCalibrationChecksum(legacy)
+       && legacy.threshold >= 0.0f && legacy.threshold <= 1.0f)
+        return {legacy.threshold, kDefaultGainCompensation};
+
+    return {kDefaultEnvelopeThreshold, kDefaultGainCompensation};
 }
 
-bool SaveCalibrationThreshold(float threshold)
+bool SaveCalibrationSettings(float threshold, float gain)
 {
-    // A NaN threshold fails both range checks and falls back to the default.
+    // A NaN setting fails both range checks and falls back to the default.
     if(!(threshold >= 0.0f && threshold <= 1.0f))
         threshold = kDefaultEnvelopeThreshold;
+    if(!(gain >= 0.0f && gain <= 1.0f))
+        gain = kDefaultGainCompensation;
 
     // QSPI cannot be written while the application executes from it.
     if(System::GetProgramMemoryRegion() == System::MemoryRegion::QSPI)
@@ -99,6 +149,7 @@ bool SaveCalibrationThreshold(float threshold)
     record.magic     = kCalibrationMagic;
     record.version   = kCalibrationVersion;
     record.threshold = threshold;
+    record.gain      = gain;
     record.checksum  = CalibrationChecksum(record);
 
     const uint32_t address = kCalibrationStorageAddress;
@@ -120,7 +171,8 @@ bool SaveCalibrationThreshold(float threshold)
     return readback.magic == record.magic
            && readback.version == record.version
            && readback.checksum == record.checksum
-           && readback.threshold == record.threshold;
+           && readback.threshold == record.threshold
+           && readback.gain == record.gain;
 }
 } // namespace
 
@@ -143,11 +195,18 @@ float    beatPhase      = 0.0f;
 // Envelope-triggered LED blink (enabled by DIP 2 outside calibration)
 bool  envelopeBlinkEnabled = false;
 float envelopeThreshold     = kDefaultEnvelopeThreshold;
+float gainCompensation      = kDefaultGainCompensation;
 
 // Calibration mode is entered and exited by holding both footswitches.
 bool     calibrationMode         = false;
 uint32_t calibrationFlashStartMs = 0;
 bool     calibrationFlashActive  = false;
+
+// Values edited in calibration stay pending until they are saved successfully.
+float pendingEnvelopeThreshold = kDefaultEnvelopeThreshold;
+float pendingGainCompensation  = kDefaultGainCompensation;
+float saveThresholdValue       = kDefaultEnvelopeThreshold;
+float saveGainValue            = kDefaultGainCompensation;
 
 volatile bool thresholdSaveRequested = false;
 volatile bool calibrationSaveErrorActive = false;
@@ -164,6 +223,9 @@ BlinkState blinkState       = BLINK_IDLE;
 uint32_t blinkStateStartMs  = 0;
 bool  envelopeAboveThreshold = false;  // previous envelope state for edge detect
 static float storedModRate  = 0.5f;    // preserves mod rate when envelope mode is on
+static float storedModAmount = 0.0f;   // preserves mod amount while calibrating
+static bool  modRatePickupPending   = false;
+static bool  modAmountPickupPending = false;
 
 static void TriggerLed2Pulse(uint32_t nowMs)
 {
@@ -212,17 +274,26 @@ static void ToggleCalibration(uint32_t nowMs)
     calibrationMode = !calibrationMode;
 
     blinkState             = BLINK_IDLE;
-    envelopeAboveThreshold = engine.GetEnvelope() >= envelopeThreshold;
+    envelopeAboveThreshold = engine.GetEnvelope()
+                             >= (calibrationMode ? pendingEnvelopeThreshold
+                                                 : envelopeThreshold);
 
     if(calibrationMode)
     {
+        pendingEnvelopeThreshold = envelopeThreshold;
+        pendingGainCompensation  = gainCompensation;
+        modAmountPickupPending   = true;
+        modRatePickupPending     = true;
+
         // Flash both LEDs twice when entering calibration.
         calibrationFlashStartMs = nowMs;
         calibrationFlashActive  = true;
     }
     else
     {
-        // Persist the tuned threshold after leaving calibration.
+        // Persist the tuned settings after leaving calibration.
+        saveThresholdValue     = pendingEnvelopeThreshold;
+        saveGainValue          = pendingGainCompensation;
         thresholdSaveRequested = true;
     }
 }
@@ -353,20 +424,48 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     engine.SetDepth(vparam2);
     engine.SetShape(TremoloEngine::ShapeFromKnob(vparam3, engine.GetShape()));
     engine.SetSpread(SpreadFromKnob(vparam4));
-    engine.SetModAmount(vparam5);
+
     if(calibrationMode)
     {
-        // Calibration: knob 6 sets the threshold; the mod rate is held.
-        envelopeThreshold = vparam6;
+        // Calibration: knob 5 sets gain compensation, knob 6 sets the
+        // threshold. Both stay pending until the settings are saved.
+        pendingGainCompensation  = vparam5;
+        pendingEnvelopeThreshold = vparam6;
+        engine.SetModAmount(storedModAmount);
         engine.SetModRate(storedModRate);
     }
     else
     {
-        // Normal operation: knob 6 controls modulation rate.
-        storedModRate = vparam6;
-        engine.SetModRate(vparam6);
+        // Hold the mod controls until their knobs are returned to the saved
+        // positions, so a value dialled in during calibration cannot leak
+        // into the normal effect.
+        if(modAmountPickupPending)
+        {
+            if(fabsf(vparam5 - storedModAmount) <= kKnobPickupTolerance)
+                modAmountPickupPending = false;
+        }
+        else
+        {
+            storedModAmount = vparam5;
+        }
+
+        if(modRatePickupPending)
+        {
+            if(fabsf(vparam6 - storedModRate) <= kKnobPickupTolerance)
+                modRatePickupPending = false;
+        }
+        else
+        {
+            storedModRate = vparam6;
+        }
+
+        engine.SetModAmount(storedModAmount);
+        engine.SetModRate(storedModRate);
     }
-    engine.SetRetriggerThreshold(envelopeThreshold);
+
+    engine.SetRetriggerThreshold(calibrationMode ? pendingEnvelopeThreshold
+                                                 : envelopeThreshold);
+    engine.SetGainCompensation(gainCompensation);
     engine.SetBypassed(bypassed);
     engine.SetRetriggerEnabled(pdip[1]);
 
@@ -414,7 +513,9 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     if(calibrationMode || envelopeBlinkEnabled)
     {
         const float env = engine.GetEnvelope();
-        const bool  nowAbove = env >= envelopeThreshold;
+        const bool  nowAbove
+            = env >= (calibrationMode ? pendingEnvelopeThreshold
+                                      : envelopeThreshold);
 
         // Rising edge triggers the blink sequence
         if(nowAbove && !envelopeAboveThreshold)
@@ -522,7 +623,13 @@ int main(void)
     hw.Init();
     hw.SetAudioBlockSize(48);
 
-    envelopeThreshold = LoadCalibrationThreshold();
+    const CalibrationSettings settings = LoadCalibrationSettings();
+    envelopeThreshold        = settings.threshold;
+    gainCompensation         = settings.gain;
+    pendingEnvelopeThreshold = settings.threshold;
+    pendingGainCompensation  = settings.gain;
+    saveThresholdValue       = settings.threshold;
+    saveGainValue            = settings.gain;
 
     const float samplerate = hw.AudioSampleRate();
 
@@ -563,6 +670,7 @@ int main(void)
 
     engine.Init(samplerate);
     engine.SetBypassed(true);
+    engine.SetGainCompensation(gainCompensation);
 
     hw.InitMidi();
     hw.midi.StartReceive();
@@ -579,10 +687,12 @@ int main(void)
         if(thresholdSaveRequested
            && static_cast<int32_t>(now - nextSaveAttemptMs) >= 0)
         {
-            if(SaveCalibrationThreshold(envelopeThreshold))
+            if(SaveCalibrationSettings(saveThresholdValue, saveGainValue))
             {
-                thresholdSaveRequested  = false;
-                nextSaveAttemptMs       = 0;
+                envelopeThreshold      = saveThresholdValue;
+                gainCompensation       = saveGainValue;
+                thresholdSaveRequested = false;
+                nextSaveAttemptMs      = 0;
             }
             else
             {

@@ -125,6 +125,7 @@ class TremoloEngine
     void SetModRate(float knob);
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
+    void SetGainCompensation(float knob);
     void SetBypassed(bool bypassed) { bypassed_ = bypassed; }
     void SetRetriggerEnabled(bool enabled) { retriggerEnabled_ = enabled; }
     void SetRetriggerThreshold(float threshold)
@@ -140,11 +141,13 @@ class TremoloEngine
     float GetRightPhase() const { return previousRightPhase_; }
     float GetEnvelope() const { return envelope_; }
     float GetSampleRate() const { return sampleRate_; }
+    float GetGainCompensation() const { return smoothedInputGain_; }
 
 
     void Process(float inL, float inR, float* outL, float* outR);
 
     static float Clamp01(float value);
+    static float InputGainFromKnob(float knob);
     static float DivisionMultiplier(int division);
     static float PrimaryFrequency(float bpm, int division);
     static float ModRateMultiplierFromKnob(float knob);
@@ -177,6 +180,8 @@ class TremoloEngine
     float smoothedModRate_;
     float smoothedGainL_;
     float smoothedGainR_;
+    float targetInputGain_;
+    float smoothedInputGain_;
     float effectiveDepth_;
     float effectiveSpread_;
     float effectiveRate_;

@@ -591,6 +591,35 @@ static void TestEnvelopeRetrigger()
     CHECK(disabled.GetPrimaryPhase() > 0.2f);
 }
 
+static void TestGainCompensation()
+{
+    CHECK_NEAR(TremoloEngine::InputGainFromKnob(0.0f), 1.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::InputGainFromKnob(1.0f),
+               std::pow(10.0f, 2.0f / 20.0f), 1e-6);
+    CHECK_NEAR(TremoloEngine::InputGainFromKnob(0.5f),
+               std::pow(10.0f, 1.0f / 20.0f), 1e-6);
+    CHECK_NEAR(TremoloEngine::InputGainFromKnob(-1.0f), 1.0f, 1e-6);
+    CHECK_NEAR(TremoloEngine::InputGainFromKnob(2.0f),
+               std::pow(10.0f, 2.0f / 20.0f), 1e-6);
+
+    TremoloEngine engine;
+    engine.Init(48000.0f);
+    engine.SetBypassed(false);
+    engine.SetDepth(0.0f);
+    engine.SetSpread(0.0f);
+    engine.SetGainCompensation(1.0f);
+
+    Warmup(engine, 4800, 0.5f, 0.25f);
+
+    float outL = 0.0f;
+    float outR = 0.0f;
+    engine.Process(0.5f, 0.25f, &outL, &outR);
+
+    const float gain = std::pow(10.0f, 2.0f / 20.0f);
+    CHECK_NEAR(outL, 0.5f * gain, 1e-4);
+    CHECK_NEAR(outR, 0.25f * gain, 1e-4);
+}
+
 int main()
 {
     TestDepthZeroIsUnity();
@@ -607,6 +636,7 @@ int main()
     TestMidiClock();
     TestTempoSelection();
     TestEnvelopeRetrigger();
+    TestGainCompensation();
 
     if(failures == 0)
     {
