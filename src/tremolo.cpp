@@ -423,6 +423,81 @@ void UpdateButtons()
     }
 }
 
+// A MIDI CC takes over the corresponding control. Moving the physical knob or
+// switch afterwards hands control back to the hardware, so the knobs always
+// win once they are touched.
+static float lastHardwareKnobs[MidiCcController::KNOB_COUNT] = {};
+static bool  knobHadMidiOverride[MidiCcController::KNOB_COUNT] = {};
+
+static float ResolveKnobValue(int index, float hardwareValue)
+{
+    if(midiControl.KnobOverridden(index))
+    {
+        if(!knobHadMidiOverride[index])
+        {
+            // Capture the physical position when MIDI takes over so a
+            // deliberate turn can be detected.
+            lastHardwareKnobs[index] = hardwareValue;
+            knobHadMidiOverride[index] = true;
+        }
+        else if(fabsf(hardwareValue - lastHardwareKnobs[index])
+                > kKnobPickupTolerance)
+        {
+            midiControl.ReleaseKnob(index);
+            knobHadMidiOverride[index] = false;
+        }
+    }
+    else
+    {
+        knobHadMidiOverride[index] = false;
+    }
+
+    return midiControl.KnobOverridden(index) ? midiControl.KnobValue(index)
+                                             : hardwareValue;
+}
+
+static int PhysicalSwitchPosition(bool left, bool right)
+{
+    if(left)
+        return MidiCcController::SWITCH_LEFT;
+    if(right)
+        return MidiCcController::SWITCH_RIGHT;
+    return MidiCcController::SWITCH_CENTER;
+}
+
+static int  lastPhysicalSwitchPositions[MidiCcController::SWITCH_COUNT] = {};
+static bool switchHadMidiOverride[MidiCcController::SWITCH_COUNT] = {};
+
+static void ApplySwitchOverride(int index, bool& left, bool& right)
+{
+    const int physical = PhysicalSwitchPosition(left, right);
+
+    if(midiControl.SwitchOverridden(index))
+    {
+        if(!switchHadMidiOverride[index])
+        {
+            lastPhysicalSwitchPositions[index] = physical;
+            switchHadMidiOverride[index] = true;
+        }
+        else if(physical != lastPhysicalSwitchPositions[index])
+        {
+            midiControl.ReleaseSwitch(index);
+            switchHadMidiOverride[index] = false;
+        }
+    }
+    else
+    {
+        switchHadMidiOverride[index] = false;
+    }
+
+    if(!midiControl.SwitchOverridden(index))
+        return;
+
+    const int position = midiControl.SwitchPosition(index);
+    left               = position == MidiCcController::SWITCH_LEFT;
+    right              = position == MidiCcController::SWITCH_RIGHT;
+}
+
 void UpdateSwitches()
 {
     // 3-way Switch 1 (apply every block so the startup position is honoured)
@@ -463,12 +538,12 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
     const uint32_t now = System::GetNow();
 
-    const float vparam1 = param1.Process();
-    const float vparam2 = param2.Process();
-    const float vparam3 = param3.Process();
-    const float vparam4 = param4.Process();
-    const float vparam5 = param5.Process();
-    const float vparam6 = param6.Process();
+    const float vparam1 = ResolveKnobValue(0, param1.Process());
+    const float vparam2 = ResolveKnobValue(1, param2.Process());
+    const float vparam3 = ResolveKnobValue(2, param3.Process());
+    const float vparam4 = ResolveKnobValue(3, param4.Process());
+    const float vparam5 = ResolveKnobValue(4, param5.Process());
+    const float vparam6 = ResolveKnobValue(5, param6.Process());
 
     engine.SetDivision(
         TremoloEngine::DivisionFromKnob(vparam1, engine.GetDivision()));
@@ -526,9 +601,46 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     while(hw.midi.HasEvents())
     {
         const MidiEvent event = hw.midi.PopEvent();
-        if(event.type == SystemRealTime
-           && event.srt_type == TimingClock)
-            tempo.MidiClock(now);
+        if(event.type == SystemRealTime)
+        {
+            if(event.srt_type == TimingClock)
+                tempo.MidiClock(now);
+            continue;
+        }
+
+        if(event.type == ControlChange)
+        {
+            const uint8_t control = event.data[0];
+            const uint8_t value   = event.data[1];
+
+            // Footswitch CCs behave like the physical pedals: a press edge
+            // toggles bypass or registers a tap tempo.
+            if(control == MidiCcController::FOOTSWITCH_1_CC)
+            {
+                const bool wasPressed = midiControl.FootswitchOverridden(0)
+                                        && midiControl.FootswitchPressed(0);
+                midiControl.ControlChange(control, value);
+                if(!wasPressed && midiControl.FootswitchPressed(0)
+                   && !calibrationMode)
+                    bypassed = !bypassed;
+            }
+            else if(control == MidiCcController::FOOTSWITCH_2_CC)
+            {
+                const bool wasPressed = midiControl.FootswitchOverridden(1)
+                                        && midiControl.FootswitchPressed(1);
+                midiControl.ControlChange(control, value);
+                if(!wasPressed && midiControl.FootswitchPressed(1)
+                   && !calibrationMode)
+                {
+                    tempo.Tap(now);
+                    TriggerLed2Pulse(now);
+                }
+            }
+            else
+            {
+                midiControl.ControlChange(control, value);
+            }
+        }
     }
 
     const float bpm = tempo.Bpm(now);

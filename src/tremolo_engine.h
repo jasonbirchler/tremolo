@@ -70,6 +70,65 @@ class TempoController
     MidiClockTempo clock_;
 };
 
+// Maps incoming MIDI Control Change messages onto the pedal controls. A
+// received value overrides the corresponding physical knob, switch, or
+// footswitch so the internal parameter follows MIDI rather than the hardware
+// position. Moving the physical control (or calling the matching Release
+// method) hands control back to the hardware.
+class MidiCcController
+{
+  public:
+    enum
+    {
+        KNOB_COUNT       = 6,
+        SWITCH_COUNT     = 3,
+        FOOTSWITCH_COUNT = 2,
+
+        KNOB_1_CC        = 21,
+        SWITCH_1_CC      = 27,
+        FOOTSWITCH_1_CC  = 30,
+        FOOTSWITCH_2_CC  = 31,
+
+        SWITCH_LEFT   = 0,
+        SWITCH_CENTER = 1,
+        SWITCH_RIGHT  = 2
+    };
+
+    MidiCcController() { Reset(); }
+
+    void Reset();
+
+    // Applies a Control Change message. Returns true when the controller
+    // number maps to a pedal parameter.
+    bool ControlChange(uint8_t control, uint8_t value);
+
+    bool  KnobOverridden(int index) const;
+    float KnobValue(int index) const;
+
+    bool SwitchOverridden(int index) const;
+    int  SwitchPosition(int index) const;
+
+    bool FootswitchOverridden(int index) const;
+    bool FootswitchPressed(int index) const;
+
+    void ReleaseKnob(int index);
+    void ReleaseSwitch(int index);
+    void ReleaseFootswitch(int index);
+
+    // Splits the 0..127 CC range into three equal bands.
+    static int SwitchPositionFromValue(uint8_t value);
+
+  private:
+    bool  knobOverridden_[KNOB_COUNT];
+    float knobValue_[KNOB_COUNT];
+
+    bool switchOverridden_[SWITCH_COUNT];
+    int  switchPosition_[SWITCH_COUNT];
+
+    bool footswitchOverridden_[FOOTSWITCH_COUNT];
+    bool footswitchPressed_[FOOTSWITCH_COUNT];
+};
+
 class TremoloEngine
 {
   public:
