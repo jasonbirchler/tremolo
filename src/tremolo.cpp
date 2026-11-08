@@ -32,7 +32,7 @@ constexpr float    kCalibrationPulseHz       = 1.0f;
 constexpr float    kDefaultEnvelopeThreshold = 0.5f;
 constexpr float    kDefaultGainCompensation  = 0.0f;
 constexpr float    kKnobPickupTolerance      = 0.02f;
-constexpr float    kPhaserMixSmoothingSeconds = 0.005f;
+constexpr float    kEffectMixSmoothingSeconds = 0.005f;
 constexpr float    kMaxVibratoDepth           = 0.2f;
 
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
@@ -69,6 +69,32 @@ struct CalibrationSettings
     float threshold;
     float gain;
 };
+
+template <typename Effect>
+void ProcessEffect(Effect& effectL, Effect& effectR, TremoloEngine& engine,
+                   bool effectFirst, float effectMix, float inL, float inR,
+                   float* outL, float* outR)
+{
+    if(effectFirst)
+    {
+        const float effectedL = effectL.Process(inL);
+        const float effectedR = effectR.Process(inR);
+        engine.Process(inL + (effectedL - inL) * effectMix,
+                       inR + (effectedR - inR) * effectMix,
+                       outL,
+                       outR);
+        return;
+    }
+
+    float tremL = 0.0f;
+    float tremR = 0.0f;
+    engine.Process(inL, inR, &tremL, &tremR);
+
+    const float effectedL = effectL.Process(tremL);
+    const float effectedR = effectR.Process(tremR);
+    *outL = tremL + (effectedL - tremL) * effectMix;
+    *outR = tremR + (effectedR - tremR) * effectMix;
+}
 } // namespace
 
 DaisyPetal hw;
@@ -179,24 +205,14 @@ bool SaveCalibrationSettings(float threshold, float gain)
 
 Parameter  param1, param2, param3, param4, param5, param6;
 
-TremoloEngine  engine;
+TremoloEngine   engine;
 TempoController tempo;
-daisysp::Phaser phaserL;
-daisysp::Phaser phaserR;
-Vibrato         vibratoL;
-Vibrato         vibratoR;
+daisysp::Phaser phaser[2];
+Vibrato         vibrato[2];
 
-// Smoothly blends the phaser or vibrato into the signal path so engaging it
-// (via switch 3) or leaving bypass does not click.
-float phaserMix            = 0.0f;
-float phaserMixCoefficient = 0.0f;
-int   lastPhaserOrder
-    = TremoloEngine::PHASER_ORDER_PHASE_FIRST;
-
-float vibratoMix       = 0.0f;
-float vibratoMixCoefficient = 0.0f;
-int   lastVibratoOrder
-    = TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST;
+float effectMix            = 0.0f;
+float effectMixCoefficient = 0.0f;
+int   lastEffectOrder      = TremoloEngine::EFFECT_ORDER_EFFECT_FIRST;
 
 bool bypassed  = true;
 uint32_t bypassPressMs = 0;
@@ -282,26 +298,14 @@ void updateSwitch2() // left = depth, center = depth + rate, right = rate
         engine.SetModTarget(TremoloEngine::TARGET_DEPTH_RATE);
 }
 
-void updateSwitch3() // phaser order, or vibrato order when DIP 3 is off
+void updateSwitch3()
 {
     if(pswitch3[0] == true)
-    {
-        // left: effect then trem
-        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_PHASE_FIRST);
-        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST);
-    }
+        engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_EFFECT_FIRST);
     else if(pswitch3[1] == true)
-    {
-        // right: trem then effect
-        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_TREMOLO_FIRST);
-        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_TREMOLO_FIRST);
-    }
+        engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_TREMOLO_FIRST);
     else
-    {
-        // center: effect off
-        engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_OFF);
-        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_OFF);
-    }
+        engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_OFF);
 }
 
 static void ToggleCalibration(uint32_t nowMs)
@@ -523,41 +527,26 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = pdip[0];
 
-    // Lock both effect LFOs to the modulation LFO rate, mirroring the phaser.
     const float modRate = engine.GetModRate();
-    phaserL.SetLfoFreq(modRate);
-    phaserR.SetLfoFreq(modRate);
-    vibratoL.SetLfoFreq(modRate);
-    vibratoR.SetLfoFreq(modRate);
+    for(size_t channel = 0; channel < 2; ++channel)
+    {
+        phaser[channel].SetLfoFreq(modRate);
+        vibrato[channel].SetLfoFreq(modRate);
+    }
 
-    // The vibrato depth is inversely proportional to the tremolo depth: more
-    // tremolo leaves less vibrato, and full tremolo disables it entirely.
     const float vibratoDepth
         = kMaxVibratoDepth * (1.0f - engine.GetDepth());
-    vibratoL.SetLfoDepth(vibratoDepth);
-    vibratoR.SetLfoDepth(vibratoDepth);
+    for(size_t channel = 0; channel < 2; ++channel)
+        vibrato[channel].SetLfoDepth(vibratoDepth);
 
-    // DIP 3 selects the phaser (on) or vibrato (off) signal path.
     const bool phaserMode = pdip[2];
+    const int  effectOrder = engine.GetEffectOrder();
+    if(effectOrder != TremoloEngine::EFFECT_ORDER_OFF)
+        lastEffectOrder = effectOrder;
 
-    const int phaserOrder  = engine.GetPhaserOrder();
-    const int vibratoOrder = engine.GetVibratoOrder();
-    if(phaserOrder != TremoloEngine::PHASER_ORDER_OFF)
-        lastPhaserOrder = phaserOrder;
-    if(vibratoOrder != TremoloEngine::VIBRATO_ORDER_OFF)
-        lastVibratoOrder = vibratoOrder;
-
-    // The selected effect only runs when switch 3 selects an order and the
-    // pedal is not bypassed. The mix fades in/out so toggling either is
-    // click-free.
-    const bool phaserEngaged
-        = phaserMode && !bypassed
-          && phaserOrder != TremoloEngine::PHASER_ORDER_OFF;
-    const bool vibratoEngaged
-        = !phaserMode && !bypassed
-          && vibratoOrder != TremoloEngine::VIBRATO_ORDER_OFF;
-    const float targetPhaserMix  = phaserEngaged ? 1.0f : 0.0f;
-    const float targetVibratoMix = vibratoEngaged ? 1.0f : 0.0f;
+    const bool effectEngaged
+        = !bypassed && effectOrder != TremoloEngine::EFFECT_ORDER_OFF;
+    const float targetEffectMix = effectEngaged ? 1.0f : 0.0f;
 
     for(size_t i = 0; i < size; i++)
     {
@@ -567,66 +556,38 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         float outL = inL;
         float outR = inR;
 
-        phaserMix += phaserMixCoefficient * (targetPhaserMix - phaserMix);
-        vibratoMix += vibratoMixCoefficient * (targetVibratoMix - vibratoMix);
+        effectMix += effectMixCoefficient * (targetEffectMix - effectMix);
 
-        if(phaserMode)
+        if(effectOrder == TremoloEngine::EFFECT_ORDER_OFF
+           && effectMix < 1.0e-4f)
         {
-            if(phaserOrder == TremoloEngine::PHASER_ORDER_OFF
-               && phaserMix < 1.0e-4f)
-            {
-                engine.Process(inL, inR, &outL, &outR);
-            }
-            else if(lastPhaserOrder
-                    == TremoloEngine::PHASER_ORDER_PHASE_FIRST)
-            {
-                const float phasedL = phaserL.Process(inL);
-                const float phasedR = phaserR.Process(inR);
-                engine.Process(inL + (phasedL - inL) * phaserMix,
-                               inR + (phasedR - inR) * phaserMix,
-                               &outL,
-                               &outR);
-            }
-            else
-            {
-                float tremL = 0.0f;
-                float tremR = 0.0f;
-                engine.Process(inL, inR, &tremL, &tremR);
-
-                const float phasedL = phaserL.Process(tremL);
-                const float phasedR = phaserR.Process(tremR);
-                outL = tremL + (phasedL - tremL) * phaserMix;
-                outR = tremR + (phasedR - tremR) * phaserMix;
-            }
+            engine.Process(inL, inR, &outL, &outR);
+        }
+        else if(phaserMode)
+        {
+            ProcessEffect(phaser[0],
+                          phaser[1],
+                          engine,
+                          lastEffectOrder
+                              == TremoloEngine::EFFECT_ORDER_EFFECT_FIRST,
+                          effectMix,
+                          inL,
+                          inR,
+                          &outL,
+                          &outR);
         }
         else
         {
-            if(vibratoOrder == TremoloEngine::VIBRATO_ORDER_OFF
-               && vibratoMix < 1.0e-4f)
-            {
-                engine.Process(inL, inR, &outL, &outR);
-            }
-            else if(lastVibratoOrder
-                    == TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST)
-            {
-                const float vibratoedL = vibratoL.Process(inL);
-                const float vibratoedR = vibratoR.Process(inR);
-                engine.Process(inL + (vibratoedL - inL) * vibratoMix,
-                               inR + (vibratoedR - inR) * vibratoMix,
-                               &outL,
-                               &outR);
-            }
-            else
-            {
-                float tremL = 0.0f;
-                float tremR = 0.0f;
-                engine.Process(inL, inR, &tremL, &tremR);
-
-                const float vibratoedL = vibratoL.Process(tremL);
-                const float vibratoedR = vibratoR.Process(tremR);
-                outL = tremL + (vibratoedL - tremL) * vibratoMix;
-                outR = tremR + (vibratoedR - tremR) * vibratoMix;
-            }
+            ProcessEffect(vibrato[0],
+                          vibrato[1],
+                          engine,
+                          lastEffectOrder
+                              == TremoloEngine::EFFECT_ORDER_EFFECT_FIRST,
+                          effectMix,
+                          inL,
+                          inR,
+                          &outL,
+                          &outR);
         }
 
         out[0][i] = outL;
@@ -766,9 +727,8 @@ int main(void)
     saveGainValue            = settings.gain;
 
     const float samplerate = hw.AudioSampleRate();
-    phaserMixCoefficient
-        = 1.0f - expf(-1.0f / (kPhaserMixSmoothingSeconds * samplerate));
-    vibratoMixCoefficient = phaserMixCoefficient;
+    effectMixCoefficient
+        = 1.0f - expf(-1.0f / (kEffectMixSmoothingSeconds * samplerate));
 
     switch1[0] = Funbox::SWITCH_1_LEFT;
     switch1[1] = Funbox::SWITCH_1_RIGHT;
@@ -809,23 +769,18 @@ int main(void)
     engine.SetBypassed(true);
     engine.SetGainCompensation(gainCompensation);
 
-    phaserL.Init(samplerate);
-    phaserL.SetLfoDepth(0.5f);
-    phaserL.SetLfoFreq(engine.GetModRate());
-    phaserL.SetPoles(4);
-    phaserL.SetFeedback(0.5f);
-    phaserR.Init(samplerate);
-    phaserR.SetLfoDepth(0.5f);
-    phaserR.SetLfoFreq(engine.GetModRate());
-    phaserR.SetPoles(4);
-    phaserR.SetFeedback(0.5f);
+    for(size_t channel = 0; channel < 2; ++channel)
+    {
+        phaser[channel].Init(samplerate);
+        phaser[channel].SetLfoDepth(0.5f);
+        phaser[channel].SetLfoFreq(engine.GetModRate());
+        phaser[channel].SetPoles(4);
+        phaser[channel].SetFeedback(0.5f);
 
-    vibratoL.Init(samplerate);
-    vibratoL.SetLfoDepth(kMaxVibratoDepth);
-    vibratoL.SetLfoFreq(engine.GetModRate());
-    vibratoR.Init(samplerate);
-    vibratoR.SetLfoDepth(kMaxVibratoDepth);
-    vibratoR.SetLfoFreq(engine.GetModRate());
+        vibrato[channel].Init(samplerate);
+        vibrato[channel].SetLfoDepth(kMaxVibratoDepth);
+        vibrato[channel].SetLfoFreq(engine.GetModRate());
+    }
 
     hw.InitMidi();
     hw.midi.StartReceive();

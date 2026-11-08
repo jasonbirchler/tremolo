@@ -170,8 +170,7 @@ void TremoloEngine::Init(float sampleRate)
     targetModMultiplier_ = ModRateMultiplierFromKnob(0.5f);
     modWaveform_         = MOD_SINE;
     modTarget_           = TARGET_DEPTH;
-    phaserOrder_         = PHASER_ORDER_OFF;
-    vibratoOrder_        = VIBRATO_ORDER_OFF;
+    effectOrder_          = EFFECT_ORDER_OFF;
     targetInputGain_     = 1.0f;
     bypassed_            = true;
 
@@ -276,22 +275,13 @@ void TremoloEngine::SetModTarget(int target)
     modTarget_ = target;
 }
 
-void TremoloEngine::SetPhaserOrder(int order)
+void TremoloEngine::SetEffectOrder(int order)
 {
     if(order < 0)
         order = 0;
-    if(order >= PHASER_ORDER_COUNT)
-        order = PHASER_ORDER_COUNT - 1;
-    phaserOrder_ = order;
-}
-
-void TremoloEngine::SetVibratoOrder(int order)
-{
-    if(order < 0)
-        order = 0;
-    if(order >= VIBRATO_ORDER_COUNT)
-        order = VIBRATO_ORDER_COUNT - 1;
-    vibratoOrder_ = order;
+    if(order >= EFFECT_ORDER_COUNT)
+        order = EFFECT_ORDER_COUNT - 1;
+    effectOrder_ = order;
 }
 
 void TremoloEngine::Process(float inL, float inR, float* outL, float* outR)

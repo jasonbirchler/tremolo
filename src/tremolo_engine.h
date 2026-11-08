@@ -111,20 +111,12 @@ class TremoloEngine
         TARGET_COUNT
     };
 
-    enum PhaserOrder
+    enum EffectOrder
     {
-        PHASER_ORDER_PHASE_FIRST,
-        PHASER_ORDER_TREMOLO_FIRST,
-        PHASER_ORDER_OFF,
-        PHASER_ORDER_COUNT
-    };
-
-    enum VibratoOrder
-    {
-        VIBRATO_ORDER_VIBRATO_FIRST,
-        VIBRATO_ORDER_TREMOLO_FIRST,
-        VIBRATO_ORDER_OFF,
-        VIBRATO_ORDER_COUNT
+        EFFECT_ORDER_EFFECT_FIRST,
+        EFFECT_ORDER_TREMOLO_FIRST,
+        EFFECT_ORDER_OFF,
+        EFFECT_ORDER_COUNT
     };
 
     TremoloEngine() { Init(48000.0f); }
@@ -141,8 +133,7 @@ class TremoloEngine
     void SetModRate(float knob);
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
-    void SetPhaserOrder(int order);
-    void SetVibratoOrder(int order);
+    void SetEffectOrder(int order);
     void SetGainCompensation(float knob);
     void SetBypassed(bool bypassed) { bypassed_ = bypassed; }
     void SetRetriggerEnabled(bool enabled) { retriggerEnabled_ = enabled; }
@@ -153,8 +144,7 @@ class TremoloEngine
 
     int   GetDivision() const { return division_; }
     int   GetShape() const { return shape_; }
-    int   GetPhaserOrder() const { return phaserOrder_; }
-    int   GetVibratoOrder() const { return vibratoOrder_; }
+    int   GetEffectOrder() const { return effectOrder_; }
     float GetDepth() const { return smoothedDepth_; }
     float GetModRate() const { return smoothedModRate_; }
     float GetPrimaryPhase() const { return primaryPhase_; }
@@ -209,8 +199,7 @@ class TremoloEngine
     int shape_;
     int modWaveform_;
     int modTarget_;
-    int phaserOrder_;
-    int vibratoOrder_;
+    int effectOrder_;
 
     float    primaryPhase_;
     float    secondaryPhase_;

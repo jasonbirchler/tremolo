@@ -55,6 +55,24 @@ static bool WaitForPrimaryWrap(TremoloEngine& engine)
     return false;
 }
 
+static void TestEffectOrder()
+{
+    TremoloEngine engine;
+    CHECK(engine.GetEffectOrder() == TremoloEngine::EFFECT_ORDER_OFF);
+
+    engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_EFFECT_FIRST);
+    CHECK(engine.GetEffectOrder() == TremoloEngine::EFFECT_ORDER_EFFECT_FIRST);
+
+    engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_TREMOLO_FIRST);
+    CHECK(engine.GetEffectOrder() == TremoloEngine::EFFECT_ORDER_TREMOLO_FIRST);
+
+    engine.SetEffectOrder(-1);
+    CHECK(engine.GetEffectOrder() == TremoloEngine::EFFECT_ORDER_EFFECT_FIRST);
+
+    engine.SetEffectOrder(TremoloEngine::EFFECT_ORDER_COUNT);
+    CHECK(engine.GetEffectOrder() == TremoloEngine::EFFECT_ORDER_OFF);
+}
+
 static void TestDepthZeroIsUnity()
 {
     TremoloEngine engine;
@@ -622,6 +640,7 @@ static void TestGainCompensation()
 
 int main()
 {
+    TestEffectOrder();
     TestDepthZeroIsUnity();
     TestDepthOneFullRange();
     TestDivisionMultipliers();
