@@ -119,6 +119,14 @@ class TremoloEngine
         PHASER_ORDER_COUNT
     };
 
+    enum VibratoOrder
+    {
+        VIBRATO_ORDER_VIBRATO_FIRST,
+        VIBRATO_ORDER_TREMOLO_FIRST,
+        VIBRATO_ORDER_OFF,
+        VIBRATO_ORDER_COUNT
+    };
+
     TremoloEngine() { Init(48000.0f); }
 
     void Init(float sampleRate);
@@ -134,6 +142,7 @@ class TremoloEngine
     void SetModWaveform(int waveform);
     void SetModTarget(int target);
     void SetPhaserOrder(int order);
+    void SetVibratoOrder(int order);
     void SetGainCompensation(float knob);
     void SetBypassed(bool bypassed) { bypassed_ = bypassed; }
     void SetRetriggerEnabled(bool enabled) { retriggerEnabled_ = enabled; }
@@ -145,6 +154,7 @@ class TremoloEngine
     int   GetDivision() const { return division_; }
     int   GetShape() const { return shape_; }
     int   GetPhaserOrder() const { return phaserOrder_; }
+    int   GetVibratoOrder() const { return vibratoOrder_; }
     float GetModRate() const { return smoothedModRate_; }
     float GetPrimaryPhase() const { return primaryPhase_; }
     float GetSecondaryPhase() const { return secondaryPhase_; }
@@ -200,6 +210,7 @@ class TremoloEngine
     int modWaveform_;
     int modTarget_;
     int phaserOrder_;
+    int vibratoOrder_;
 
     float    primaryPhase_;
     float    secondaryPhase_;

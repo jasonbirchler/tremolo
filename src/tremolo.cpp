@@ -2,6 +2,7 @@
 #include "daisysp.h"
 #include "funbox.h"
 #include "tremolo_engine.h"
+#include "vibrato.h"
 
 #include <cmath>
 #include <cstring>
@@ -182,13 +183,20 @@ TremoloEngine  engine;
 TempoController tempo;
 daisysp::Phaser phaserL;
 daisysp::Phaser phaserR;
+Vibrato         vibratoL;
+Vibrato         vibratoR;
 
-// Smoothly blends the phaser into the signal path so engaging it (via switch
-// 3) or leaving bypass does not click.
+// Smoothly blends the phaser or vibrato into the signal path so engaging it
+// (via switch 3) or leaving bypass does not click.
 float phaserMix            = 0.0f;
 float phaserMixCoefficient = 0.0f;
 int   lastPhaserOrder
     = TremoloEngine::PHASER_ORDER_PHASE_FIRST;
+
+float vibratoMix       = 0.0f;
+float vibratoMixCoefficient = 0.0f;
+int   lastVibratoOrder
+    = TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST;
 
 bool bypassed  = true;
 uint32_t bypassPressMs = 0;
@@ -274,17 +282,26 @@ void updateSwitch2() // left = depth, center = depth + rate, right = rate
         engine.SetModTarget(TremoloEngine::TARGET_DEPTH_RATE);
 }
 
-void updateSwitch3() // phaser
+void updateSwitch3() // phaser order, or vibrato order when DIP 3 is off
 {
     if(pswitch3[0] == true)
-        // phase then trem
+    {
+        // left: effect then trem
         engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_PHASE_FIRST);
+        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST);
+    }
     else if(pswitch3[1] == true)
-        // trem then phase
+    {
+        // right: trem then effect
         engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_TREMOLO_FIRST);
+        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_TREMOLO_FIRST);
+    }
     else
-        // phaser off
+    {
+        // center: effect off
         engine.SetPhaserOrder(TremoloEngine::PHASER_ORDER_OFF);
+        engine.SetVibratoOrder(TremoloEngine::VIBRATO_ORDER_OFF);
+    }
 }
 
 static void ToggleCalibration(uint32_t nowMs)
@@ -406,13 +423,15 @@ void UpdateSwitches()
         pswitch2[i] = hw.switches[switch2[i]].Pressed();
     updateSwitch2();
 
-    // 3-way Switch 3 selects the phaser order (left, center = off, right)
+    // 3-way Switch 3 selects the phaser or vibrato order (left, center = off,
+    // right). DIP 3 chooses which effect the switch controls.
     for(int i = 0; i < 2; i++)
         pswitch3[i] = hw.switches[switch3[i]].Pressed();
     updateSwitch3();
 
     // DIP switches; DIP 1 selects mono (off) or stereo (on) input.
     // DIP 2 enables envelope-triggered LED blink mode.
+    // DIP 3 selects phaser (on) or vibrato (off) routing for Switch 3.
     for(int i = 0; i < 4; i++)
         pdip[i] = hw.switches[dip[i]].Pressed();
 
@@ -505,20 +524,34 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = pdip[0];
 
-    // Lock both phaser LFOs to the modulation LFO rate.
+    // Lock both effect LFOs to the modulation LFO rate, mirroring the phaser.
     const float modRate = engine.GetModRate();
     phaserL.SetLfoFreq(modRate);
     phaserR.SetLfoFreq(modRate);
+    vibratoL.SetLfoFreq(modRate);
+    vibratoR.SetLfoFreq(modRate);
 
-    const int phaserOrder = engine.GetPhaserOrder();
+    // DIP 3 selects the phaser (on) or vibrato (off) signal path.
+    const bool phaserMode = pdip[2];
+
+    const int phaserOrder  = engine.GetPhaserOrder();
+    const int vibratoOrder = engine.GetVibratoOrder();
     if(phaserOrder != TremoloEngine::PHASER_ORDER_OFF)
         lastPhaserOrder = phaserOrder;
+    if(vibratoOrder != TremoloEngine::VIBRATO_ORDER_OFF)
+        lastVibratoOrder = vibratoOrder;
 
-    // The phaser only runs when switch 3 selects an order and the pedal is
-    // not bypassed. The mix fades in/out so toggling either is click-free.
-    const bool  phaserEngaged
-        = !bypassed && phaserOrder != TremoloEngine::PHASER_ORDER_OFF;
-    const float targetPhaserMix = phaserEngaged ? 1.0f : 0.0f;
+    // The selected effect only runs when switch 3 selects an order and the
+    // pedal is not bypassed. The mix fades in/out so toggling either is
+    // click-free.
+    const bool phaserEngaged
+        = phaserMode && !bypassed
+          && phaserOrder != TremoloEngine::PHASER_ORDER_OFF;
+    const bool vibratoEngaged
+        = !phaserMode && !bypassed
+          && vibratoOrder != TremoloEngine::VIBRATO_ORDER_OFF;
+    const float targetPhaserMix  = phaserEngaged ? 1.0f : 0.0f;
+    const float targetVibratoMix = vibratoEngaged ? 1.0f : 0.0f;
 
     for(size_t i = 0; i < size; i++)
     {
@@ -529,31 +562,65 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         float outR = inR;
 
         phaserMix += phaserMixCoefficient * (targetPhaserMix - phaserMix);
+        vibratoMix += vibratoMixCoefficient * (targetVibratoMix - vibratoMix);
 
-        if(phaserOrder == TremoloEngine::PHASER_ORDER_OFF
-           && phaserMix < 1.0e-4f)
+        if(phaserMode)
         {
-            engine.Process(inL, inR, &outL, &outR);
-        }
-        else if(lastPhaserOrder
-                == TremoloEngine::PHASER_ORDER_PHASE_FIRST)
-        {
-            const float phasedL = phaserL.Process(inL);
-            const float phasedR = phaserR.Process(inR);
-            engine.Process(inL + (phasedL - inL) * phaserMix,
-                           inR + (phasedR - inR) * phaserMix,
-                           &outL, &outR);
+            if(phaserOrder == TremoloEngine::PHASER_ORDER_OFF
+               && phaserMix < 1.0e-4f)
+            {
+                engine.Process(inL, inR, &outL, &outR);
+            }
+            else if(lastPhaserOrder
+                    == TremoloEngine::PHASER_ORDER_PHASE_FIRST)
+            {
+                const float phasedL = phaserL.Process(inL);
+                const float phasedR = phaserR.Process(inR);
+                engine.Process(inL + (phasedL - inL) * phaserMix,
+                               inR + (phasedR - inR) * phaserMix,
+                               &outL,
+                               &outR);
+            }
+            else
+            {
+                float tremL = 0.0f;
+                float tremR = 0.0f;
+                engine.Process(inL, inR, &tremL, &tremR);
+
+                const float phasedL = phaserL.Process(tremL);
+                const float phasedR = phaserR.Process(tremR);
+                outL = tremL + (phasedL - tremL) * phaserMix;
+                outR = tremR + (phasedR - tremR) * phaserMix;
+            }
         }
         else
         {
-            float tremL = 0.0f;
-            float tremR = 0.0f;
-            engine.Process(inL, inR, &tremL, &tremR);
+            if(vibratoOrder == TremoloEngine::VIBRATO_ORDER_OFF
+               && vibratoMix < 1.0e-4f)
+            {
+                engine.Process(inL, inR, &outL, &outR);
+            }
+            else if(lastVibratoOrder
+                    == TremoloEngine::VIBRATO_ORDER_VIBRATO_FIRST)
+            {
+                const float vibratoedL = vibratoL.Process(inL);
+                const float vibratoedR = vibratoR.Process(inR);
+                engine.Process(inL + (vibratoedL - inL) * vibratoMix,
+                               inR + (vibratoedR - inR) * vibratoMix,
+                               &outL,
+                               &outR);
+            }
+            else
+            {
+                float tremL = 0.0f;
+                float tremR = 0.0f;
+                engine.Process(inL, inR, &tremL, &tremR);
 
-            const float phasedL = phaserL.Process(tremL);
-            const float phasedR = phaserR.Process(tremR);
-            outL = tremL + (phasedL - tremL) * phaserMix;
-            outR = tremR + (phasedR - tremR) * phaserMix;
+                const float vibratoedL = vibratoL.Process(tremL);
+                const float vibratoedR = vibratoR.Process(tremR);
+                outL = tremL + (vibratoedL - tremL) * vibratoMix;
+                outR = tremR + (vibratoedR - tremR) * vibratoMix;
+            }
         }
 
         out[0][i] = outL;
@@ -695,6 +762,7 @@ int main(void)
     const float samplerate = hw.AudioSampleRate();
     phaserMixCoefficient
         = 1.0f - expf(-1.0f / (kPhaserMixSmoothingSeconds * samplerate));
+    vibratoMixCoefficient = phaserMixCoefficient;
 
     switch1[0] = Funbox::SWITCH_1_LEFT;
     switch1[1] = Funbox::SWITCH_1_RIGHT;
@@ -745,6 +813,13 @@ int main(void)
     phaserR.SetLfoFreq(engine.GetModRate());
     phaserR.SetPoles(4);
     phaserR.SetFeedback(0.5f);
+
+    vibratoL.Init(samplerate);
+    vibratoL.SetLfoDepth(0.5f);
+    vibratoL.SetLfoFreq(engine.GetModRate());
+    vibratoR.Init(samplerate);
+    vibratoR.SetLfoDepth(0.5f);
+    vibratoR.SetLfoFreq(engine.GetModRate());
 
     hw.InitMidi();
     hw.midi.StartReceive();
