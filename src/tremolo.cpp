@@ -815,10 +815,10 @@ int main(void)
     phaserR.SetFeedback(0.5f);
 
     vibratoL.Init(samplerate);
-    vibratoL.SetLfoDepth(0.5f);
+    vibratoL.SetLfoDepth(0.2f);
     vibratoL.SetLfoFreq(engine.GetModRate());
     vibratoR.Init(samplerate);
-    vibratoR.SetLfoDepth(0.5f);
+    vibratoR.SetLfoDepth(0.2f);
     vibratoR.SetLfoFreq(engine.GetModRate());
 
     hw.InitMidi();
