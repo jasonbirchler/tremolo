@@ -442,8 +442,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
                           AudioHandle::OutputBuffer out,
                           size_t                    size)
 {
-    hw.ProcessAnalogControls();
-    hw.ProcessDigitalControls();
+    hw.ProcessAllControls();
 
     UpdateButtons();
     UpdateSwitches();
