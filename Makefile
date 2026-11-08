@@ -8,7 +8,7 @@ OPT = -O1
 #OPT=-Os
 
 # Sources
-CPP_SOURCES = src/tremolo.cpp src/tremolo_engine.cpp
+CPP_SOURCES = src/tremolo.cpp src/tremolo_engine.cpp src/vibrato.cpp
 
 # Library Locations
 LIBDAISY_DIR = libDaisy
