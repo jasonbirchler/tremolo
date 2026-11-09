@@ -5,6 +5,7 @@
 #include "vibrato.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 
 //
@@ -34,6 +35,9 @@ constexpr float    kDefaultGainCompensation  = 0.0f;
 constexpr float    kKnobPickupTolerance      = 0.02f;
 constexpr float    kEffectMixSmoothingSeconds = 0.005f;
 constexpr float    kMaxVibratoDepth           = 0.2f;
+static constexpr uint32_t kEnvelopeBlinkDurations[] = {100, 400, 100, 400};
+constexpr size_t kEnvelopeBlinkPhaseCount
+    = sizeof(kEnvelopeBlinkDurations) / sizeof(kEnvelopeBlinkDurations[0]);
 
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
 // the start of QSPI, so this sector survives normal reflashing and reboots.
@@ -69,6 +73,16 @@ struct CalibrationSettings
     float threshold;
     float gain;
 };
+
+bool FlashActive(uint32_t now,
+                 uint32_t start,
+                 uint32_t totalMs,
+                 uint32_t periodMs,
+                 uint32_t onMs)
+{
+    const uint32_t elapsed = now - start;
+    return periodMs != 0 && elapsed < totalMs && elapsed % periodMs < onMs;
+}
 
 template <typename Effect>
 void ProcessEffect(Effect& effectL, Effect& effectR, TremoloEngine& engine,
@@ -232,7 +246,7 @@ bool dipSwitch4On        = false;
 Led led1, led2;
 
 uint32_t led2PulseUntil = 0;
-float    beatPhase      = 0.0f;
+Metro    quarterNoteMetro;
 
 // Envelope-triggered LED blink (enabled by DIP 2 outside calibration)
 bool  envelopeBlinkEnabled = false;
@@ -260,10 +274,9 @@ bool     bothHoldConsumed            = false;
 bool     dualHoldGestureActive       = false;
 bool     fs1PressToggledBypass       = false;
 
-enum BlinkState { BLINK_IDLE, BLINK_ON1, BLINK_OFF1, BLINK_ON2, BLINK_OFF2 };
-BlinkState blinkState       = BLINK_IDLE;
-uint32_t blinkStateStartMs  = 0;
-bool  envelopeAboveThreshold = false;  // previous envelope state for edge detect
+size_t   envelopeBlinkPhase   = kEnvelopeBlinkPhaseCount;
+uint32_t envelopeBlinkStartMs = 0;
+bool     envelopeAboveThreshold = false;
 static float storedModRate  = 0.5f;    // preserves mod rate when envelope mode is on
 static float storedModAmount = 0.0f;   // preserves mod amount while calibrating
 static bool  modRatePickupPending   = false;
@@ -321,7 +334,7 @@ static void ToggleCalibration(uint32_t nowMs)
 {
     calibrationMode = !calibrationMode;
 
-    blinkState             = BLINK_IDLE;
+    envelopeBlinkPhase      = kEnvelopeBlinkPhaseCount;
     envelopeAboveThreshold = engine.GetEnvelope()
                              >= (calibrationMode ? pendingEnvelopeThreshold
                                                  : envelopeThreshold);
@@ -648,8 +661,8 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
     const float bpm = tempo.Bpm(now);
     engine.SetTempo(bpm);
+    quarterNoteMetro.SetFreq(bpm / 60.0f);
 
-    const float sampleRate = engine.GetSampleRate();
     const bool  stereo     = dipSwitch1On;
 
     const float modRate = engine.GetModRate();
@@ -717,14 +730,9 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
         out[0][i] = outL;
         out[1][i] = outR;
-    }
 
-    // Quarter-note blink for LED 2.
-    beatPhase += static_cast<float>(size) * (bpm / 60.0f) / sampleRate;
-    if(beatPhase >= 1.0f)
-    {
-        beatPhase -= floorf(beatPhase);
-        TriggerLed2Pulse(now);
+        if(quarterNoteMetro.Process())
+            TriggerLed2Pulse(now);
     }
 
     float led1Value = bypassed ? 0.0f : 1.0f;
@@ -737,57 +745,32 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
             = env >= (calibrationMode ? pendingEnvelopeThreshold
                                       : envelopeThreshold);
 
-        // Rising edge triggers the blink sequence
         if(nowAbove && !envelopeAboveThreshold)
         {
-            blinkState          = BLINK_ON1;
-            blinkStateStartMs   = now;
+            envelopeBlinkPhase   = 0;
+            envelopeBlinkStartMs = now;
         }
         envelopeAboveThreshold = nowAbove;
 
-        // State machine: ON1 (100ms) -> OFF1 (400ms) -> ON2 (100ms) -> OFF2 -> idle
-        switch(blinkState)
+        if(envelopeBlinkPhase < kEnvelopeBlinkPhaseCount)
         {
-            case BLINK_ON1:
-                led1Value = 1.0f;
-                if(now - blinkStateStartMs >= 100)
-                {
-                    blinkState        = BLINK_OFF1;
-                    blinkStateStartMs = now;
-                }
-                break;
-            case BLINK_OFF1:
-                led1Value = 0.0f;
-                if(now - blinkStateStartMs >= 400)  // 500ms total from ON1 start
-                {
-                    blinkState        = BLINK_ON2;
-                    blinkStateStartMs = now;
-                }
-                break;
-            case BLINK_ON2:
-                led1Value = 1.0f;
-                if(now - blinkStateStartMs >= 100)
-                {
-                    blinkState        = BLINK_OFF2;
-                    blinkStateStartMs = now;
-                }
-                break;
-            case BLINK_OFF2:
-                led1Value = 0.0f;
-                if(now - blinkStateStartMs >= 400)
-                    blinkState = BLINK_IDLE;
-                break;
-            case BLINK_IDLE:
-            default:
-                // Outside calibration fall back to the bypass indicator.
-                led1Value = calibrationMode ? 0.0f
-                                            : (bypassed ? 0.0f : 1.0f);
-                break;
+            led1Value = envelopeBlinkPhase % 2 == 0 ? 1.0f : 0.0f;
+            if(now - envelopeBlinkStartMs
+               >= kEnvelopeBlinkDurations[envelopeBlinkPhase])
+            {
+                ++envelopeBlinkPhase;
+                envelopeBlinkStartMs = now;
+            }
+        }
+        else
+        {
+            led1Value = calibrationMode ? 0.0f
+                                        : (bypassed ? 0.0f : 1.0f);
         }
     }
     else
     {
-        blinkState = BLINK_IDLE;
+        envelopeBlinkPhase = kEnvelopeBlinkPhaseCount;
     }
 
     // Two-flash indication on both LEDs when entering calibration.
@@ -796,8 +779,11 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         const uint32_t elapsed = now - calibrationFlashStartMs;
         if(elapsed < kCalibrationFlashTotalMs)
         {
-            const bool on
-                = (elapsed % kCalibrationFlashPeriodMs) < kCalibrationFlashOnMs;
+            const bool on = FlashActive(now,
+                                        calibrationFlashStartMs,
+                                        kCalibrationFlashTotalMs,
+                                        kCalibrationFlashPeriodMs,
+                                        kCalibrationFlashOnMs);
             led1Value = on ? 1.0f : 0.0f;
             led2Value = on ? 1.0f : 0.0f;
         }
@@ -820,8 +806,11 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
         const uint32_t elapsed = now - calibrationSaveErrorStartMs;
         if(elapsed < kSaveErrorFlashTotalMs)
         {
-            const bool on
-                = (elapsed % kSaveErrorFlashPeriodMs) < kSaveErrorFlashOnMs;
+            const bool on = FlashActive(now,
+                                        calibrationSaveErrorStartMs,
+                                        kSaveErrorFlashTotalMs,
+                                        kSaveErrorFlashPeriodMs,
+                                        kSaveErrorFlashOnMs);
             led1Value = on ? 1.0f : 0.0f;
             led2Value = on ? 1.0f : 0.0f;
         }
@@ -852,6 +841,7 @@ int main(void)
     saveGainValue            = settings.gain;
 
     const float samplerate = hw.AudioSampleRate();
+    quarterNoteMetro.Init(tempo.Bpm(System::GetNow()) / 60.0f, samplerate);
     effectMixCoefficient
         = 1.0f - expf(-1.0f / (kEffectMixSmoothingSeconds * samplerate));
 
