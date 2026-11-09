@@ -15,8 +15,10 @@ Stereo tremolo for the GuitarML FunBox v3 (Daisy Seed) platform.
 | 3-Way Switch 1 | Second LFO waveform | Left = sine, center = saw, right = square. |
 | 3-Way Switch 2 | Second LFO target | Left = depth, center = depth + rate, right = rate. |
 | 3-Way Switch 3 | Unused | |
-| DIP Switch 1 | Input mode | OFF = mono (left input duplicated), ON = stereo. |
-| DIP Switch 2-4 | Unused | |
+| DIP Switch 1 | Input mode | ON = mono (left input duplicated), OFF = stereo. |
+| DIP Switch 2 | Output mode | ON = mono (L/R summed to both outputs), OFF = stereo. |
+| DIP Switch 3 | Envelope input | ON = envelope retrigger and envelope LED blink enabled. |
+| DIP Switch 4 | Effect selection | ON = phaser, OFF = vibrato. |
 | FS 1 | Bypass | Toggles immediately on press. Release within 600 ms latches the new state; holding longer than 600 ms makes it momentary and restores the previous state on release. |
 | FS 2 | Tap tempo | Updates the base tempo. |
 | LED 1 | Effect active | Off while bypassed and not momentarily engaged. |

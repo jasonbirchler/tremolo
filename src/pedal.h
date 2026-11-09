@@ -73,6 +73,7 @@ class Pedal
     bool     dualHoldGestureActive_       = false;
 
     bool stereo_              = false;
+    bool monoOutput_          = false;
     bool retriggerEnabled_    = false;
     bool phaserMode_          = false;
     bool envelopeBlinkEnabled_ = false;

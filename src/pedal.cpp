@@ -27,6 +27,13 @@ float SpreadFromKnob(float knob)
     return (expf(kSpreadCurve * knob) - 1.0f) / (expf(kSpreadCurve) - 1.0f);
 }
 
+// Mono fold-down: the mid component. Averaging keeps correlated content at
+// unity gain instead of the +6 dB a raw L+R sum would produce.
+float SumToMono(float left, float right)
+{
+    return (left + right) * 0.5f;
+}
+
 template <typename Effect>
 void ProcessEffect(Effect& effectL, Effect& effectR, TremoloEngine& engine,
                    bool effectFirst, float effectMix, float inL, float inR,
@@ -249,11 +256,14 @@ void Pedal::ReadSwitches(const MidiCcController& midi)
     else
         engine_.SetEffectOrder(TremoloEngine::EFFECT_ORDER_OFF);
 
-    // DIP 1: mono/stereo input. DIP 2: envelope LED blink and retrigger.
-    // DIP 3: phaser (on) or vibrato (off) routing for Switch 3.
-    stereo_           = hw_.switches[Funbox::SWITCH_DIP_1].Pressed();
-    retriggerEnabled_ = hw_.switches[Funbox::SWITCH_DIP_2].Pressed();
-    phaserMode_       = hw_.switches[Funbox::SWITCH_DIP_3].Pressed();
+    // DIP 1: input mode (ON = mono, OFF = stereo).
+    // DIP 2: output mode (ON = mono, OFF = stereo).
+    // DIP 3: envelope input (retrigger and envelope LED blink).
+    // DIP 4: effect selection (ON = phaser, OFF = vibrato).
+    stereo_           = !hw_.switches[Funbox::SWITCH_DIP_1].Pressed();
+    monoOutput_       = hw_.switches[Funbox::SWITCH_DIP_2].Pressed();
+    retriggerEnabled_ = hw_.switches[Funbox::SWITCH_DIP_3].Pressed();
+    phaserMode_       = hw_.switches[Funbox::SWITCH_DIP_4].Pressed();
 
     envelopeBlinkEnabled_ = retriggerEnabled_ && !bypassed_;
 }
@@ -358,8 +368,17 @@ void Pedal::RenderSamples(AudioHandle::InputBuffer  in,
                           effectMix_, inL, inR, &outL, &outR);
         }
 
-        out[0][i] = outL;
-        out[1][i] = outR;
+        if(monoOutput_)
+        {
+            const float mono = SumToMono(outL, outR);
+            out[0][i]        = mono;
+            out[1][i]        = mono;
+        }
+        else
+        {
+            out[0][i] = outL;
+            out[1][i] = outR;
+        }
 
         if(quarterNoteMetro_.Process())
             leds_.PulseRight(now);
