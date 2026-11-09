@@ -495,7 +495,7 @@ void UpdateSwitches()
     dipSwitch3On = hw.switches[Funbox::SWITCH_DIP_3].Pressed();
     dipSwitch4On = hw.switches[Funbox::SWITCH_DIP_4].Pressed();
 
-    envelopeBlinkEnabled = dipSwitch2On;
+    envelopeBlinkEnabled = dipSwitch2On && !bypassed;
 }
 
 static void AudioCallback(AudioHandle::InputBuffer  in,
