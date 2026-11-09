@@ -207,6 +207,7 @@ Parameter  param1, param2, param3, param4, param5, param6;
 
 TremoloEngine   engine;
 TempoController tempo;
+MidiCcController midiControl;
 daisysp::Phaser phaser[2];
 Vibrato         vibrato[2];
 
@@ -503,17 +504,20 @@ void UpdateSwitches()
     // 3-way Switch 1 (apply every block so the startup position is honoured)
     switch1LeftPressed = hw.switches[Funbox::SWITCH_1_LEFT].Pressed();
     switch1RightPressed = hw.switches[Funbox::SWITCH_1_RIGHT].Pressed();
+    ApplySwitchOverride(0, switch1LeftPressed, switch1RightPressed);
     updateSwitch1();
 
     // 3-way Switch 2
     switch2LeftPressed = hw.switches[Funbox::SWITCH_2_LEFT].Pressed();
     switch2RightPressed = hw.switches[Funbox::SWITCH_2_RIGHT].Pressed();
+    ApplySwitchOverride(1, switch2LeftPressed, switch2RightPressed);
     updateSwitch2();
 
     // 3-way Switch 3 selects the phaser or vibrato order (left, center = off,
     // right). DIP 3 chooses which effect the switch controls.
     switch3LeftPressed = hw.switches[Funbox::SWITCH_3_LEFT].Pressed();
     switch3RightPressed = hw.switches[Funbox::SWITCH_3_RIGHT].Pressed();
+    ApplySwitchOverride(2, switch3LeftPressed, switch3RightPressed);
     updateSwitch3();
 
     // DIP switches; DIP 1 selects mono (off) or stereo (on) input.
@@ -600,7 +604,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
     hw.midi.Listen();
     while(hw.midi.HasEvents())
     {
-        const MidiEvent event = hw.midi.PopEvent();
+        MidiEvent event = hw.midi.PopEvent();
         if(event.type == SystemRealTime)
         {
             if(event.srt_type == TimingClock)
@@ -610,25 +614,24 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
         if(event.type == ControlChange)
         {
-            const uint8_t control = event.data[0];
-            const uint8_t value   = event.data[1];
+            const ControlChangeEvent cc = event.AsControlChange();
 
             // Footswitch CCs behave like the physical pedals: a press edge
             // toggles bypass or registers a tap tempo.
-            if(control == MidiCcController::FOOTSWITCH_1_CC)
+            if(cc.control_number == MidiCcController::FOOTSWITCH_1_CC)
             {
                 const bool wasPressed = midiControl.FootswitchOverridden(0)
                                         && midiControl.FootswitchPressed(0);
-                midiControl.ControlChange(control, value);
+                midiControl.ControlChange(cc.control_number, cc.value);
                 if(!wasPressed && midiControl.FootswitchPressed(0)
                    && !calibrationMode)
                     bypassed = !bypassed;
             }
-            else if(control == MidiCcController::FOOTSWITCH_2_CC)
+            else if(cc.control_number == MidiCcController::FOOTSWITCH_2_CC)
             {
                 const bool wasPressed = midiControl.FootswitchOverridden(1)
                                         && midiControl.FootswitchPressed(1);
-                midiControl.ControlChange(control, value);
+                midiControl.ControlChange(cc.control_number, cc.value);
                 if(!wasPressed && midiControl.FootswitchPressed(1)
                    && !calibrationMode)
                 {
@@ -638,7 +641,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
             }
             else
             {
-                midiControl.ControlChange(control, value);
+                midiControl.ControlChange(cc.control_number, cc.value);
             }
         }
     }
