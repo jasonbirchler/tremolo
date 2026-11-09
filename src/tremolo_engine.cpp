@@ -23,7 +23,7 @@ const float kEnvelopeAttackSeconds = 0.001f;
 const float kEnvelopeReleaseSeconds = 0.1f;
 const float kEnvelopeRearmRatio = 0.7f;
 const float kDefaultRetriggerThreshold = 0.75f;
-const float kMaxGainCompensationDb = 2.0f;
+const float kMaxGainCompensationDb = 6.0f;
 
 float ModWaveformValue(int waveform, float phase)
 {

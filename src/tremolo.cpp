@@ -42,36 +42,21 @@ constexpr size_t kEnvelopeBlinkPhaseCount
 // Last 4 kB sector of the 8 MB QSPI flash. Firmware images are stored from
 // the start of QSPI, so this sector survives normal reflashing and reboots.
 constexpr uint32_t kCalibrationStorageAddress = 0x007FF000;
-constexpr uint32_t kCalibrationMagic          = 0x43414C32u; // "CAL2"
-constexpr uint32_t kCalibrationVersion        = 2u;
-constexpr uint32_t kLegacyCalibrationMagic    = 0x43414C31u; // "CAL1"
-constexpr uint32_t kLegacyCalibrationVersion  = 1u;
-
-struct CalibrationRecord
-{
-    uint32_t magic;
-    uint32_t version;
-    float    threshold;
-    float    gain;
-    uint32_t checksum;
-};
-static_assert(sizeof(CalibrationRecord) == 20,
-              "CalibrationRecord must be 20 bytes");
-
-struct LegacyCalibrationRecord
-{
-    uint32_t magic;
-    uint32_t version;
-    float    threshold;
-    uint32_t checksum;
-};
-static_assert(sizeof(LegacyCalibrationRecord) == 16,
-              "LegacyCalibrationRecord must be 16 bytes");
 
 struct CalibrationSettings
 {
     float threshold;
     float gain;
+
+    bool operator==(const CalibrationSettings& other) const
+    {
+        return threshold == other.threshold && gain == other.gain;
+    }
+
+    bool operator!=(const CalibrationSettings& other) const
+    {
+        return !(*this == other);
+    }
 };
 
 bool FlashActive(uint32_t now,
@@ -115,63 +100,39 @@ DaisyPetal hw;
 
 namespace
 {
-uint32_t FloatBits(float value)
-{
-    uint32_t bits;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return bits;
-}
+using CalibrationStorage = PersistentStorage<CalibrationSettings>;
 
-uint32_t CalibrationChecksum(const CalibrationRecord& record)
+// Mirrors PersistentStorage's internal SaveStruct so the persisted record can
+// be verified after Save().
+struct StoredCalibration
 {
-    return record.magic ^ record.version ^ FloatBits(record.threshold)
-           ^ FloatBits(record.gain) ^ 0xA5A5A5A5u;
-}
+    CalibrationStorage::State state;
+    CalibrationSettings       settings;
+};
 
-uint32_t LegacyCalibrationChecksum(const LegacyCalibrationRecord& record)
-{
-    return record.magic ^ record.version ^ FloatBits(record.threshold)
-           ^ 0xA5A5A5A5u;
-}
+CalibrationStorage calibrationStorage(hw.seed.qspi);
 
 void InvalidateCalibrationCache()
 {
     auto* mapped = static_cast<uint8_t*>(
         hw.seed.qspi.GetData(kCalibrationStorageAddress));
-    dsy_dma_invalidate_cache_for_buffer(mapped, sizeof(CalibrationRecord));
+    dsy_dma_invalidate_cache_for_buffer(mapped, sizeof(StoredCalibration));
 }
 
 CalibrationSettings LoadCalibrationSettings()
 {
+    const CalibrationSettings defaults{kDefaultEnvelopeThreshold,
+                                       kDefaultGainCompensation};
+
     InvalidateCalibrationCache();
+    calibrationStorage.Init(defaults, kCalibrationStorageAddress);
 
-    CalibrationRecord record;
-    std::memcpy(&record,
-                hw.seed.qspi.GetData(kCalibrationStorageAddress),
-                sizeof(record));
-
-    const float threshold = record.threshold;
-    const float gain      = record.gain;
-    if(record.magic == kCalibrationMagic
-       && record.version == kCalibrationVersion
-       && record.checksum == CalibrationChecksum(record)
-       && threshold >= 0.0f && threshold <= 1.0f
-       && gain >= 0.0f && gain <= 1.0f)
-        return {threshold, gain};
-
-    // Preserve the threshold from a record written before gain compensation
-    // was added.
-    LegacyCalibrationRecord legacy;
-    std::memcpy(&legacy,
-                hw.seed.qspi.GetData(kCalibrationStorageAddress),
-                sizeof(legacy));
-    if(legacy.magic == kLegacyCalibrationMagic
-       && legacy.version == kLegacyCalibrationVersion
-       && legacy.checksum == LegacyCalibrationChecksum(legacy)
-       && legacy.threshold >= 0.0f && legacy.threshold <= 1.0f)
-        return {legacy.threshold, kDefaultGainCompensation};
-
-    return {kDefaultEnvelopeThreshold, kDefaultGainCompensation};
+    CalibrationSettings settings = calibrationStorage.GetSettings();
+    if(!(settings.threshold >= 0.0f && settings.threshold <= 1.0f))
+        settings.threshold = kDefaultEnvelopeThreshold;
+    if(!(settings.gain >= 0.0f && settings.gain <= 1.0f))
+        settings.gain = kDefaultGainCompensation;
+    return settings;
 }
 
 bool SaveCalibrationSettings(float threshold, float gain)
@@ -186,34 +147,20 @@ bool SaveCalibrationSettings(float threshold, float gain)
     if(System::GetProgramMemoryRegion() == System::MemoryRegion::QSPI)
         return false;
 
-    CalibrationRecord record;
-    record.magic     = kCalibrationMagic;
-    record.version   = kCalibrationVersion;
-    record.threshold = threshold;
-    record.gain      = gain;
-    record.checksum  = CalibrationChecksum(record);
-
-    const uint32_t address = kCalibrationStorageAddress;
-    if(hw.seed.qspi.Erase(address, address + sizeof(record))
-       != QSPIHandle::Result::OK)
-        return false;
-    if(hw.seed.qspi.Write(address,
-                          sizeof(record),
-                          reinterpret_cast<uint8_t*>(&record))
-       != QSPIHandle::Result::OK)
-        return false;
+    const CalibrationSettings requested{threshold, gain};
+    calibrationStorage.GetSettings() = requested;
+    calibrationStorage.Save();
 
     InvalidateCalibrationCache();
-    CalibrationRecord readback;
+    StoredCalibration readback;
     std::memcpy(&readback,
-                hw.seed.qspi.GetData(address),
+                hw.seed.qspi.GetData(kCalibrationStorageAddress),
                 sizeof(readback));
 
-    return readback.magic == record.magic
-           && readback.version == record.version
-           && readback.checksum == record.checksum
-           && readback.threshold == record.threshold
-           && readback.gain == record.gain;
+    const bool persisted
+        = readback.state == CalibrationStorage::State::FACTORY
+          || readback.state == CalibrationStorage::State::USER;
+    return persisted && readback.settings == requested;
 }
 } // namespace
 
@@ -263,6 +210,13 @@ float pendingEnvelopeThreshold = kDefaultEnvelopeThreshold;
 float pendingGainCompensation  = kDefaultGainCompensation;
 float saveThresholdValue       = kDefaultEnvelopeThreshold;
 float saveGainValue            = kDefaultGainCompensation;
+
+// During calibration the player should hear the pending gain value; otherwise
+// the engine uses the value that was last persisted.
+static float ActiveGain()
+{
+    return calibrationMode ? pendingGainCompensation : gainCompensation;
+}
 
 volatile bool thresholdSaveRequested = false;
 volatile bool calibrationSaveErrorActive = false;
@@ -608,7 +562,7 @@ static void AudioCallback(AudioHandle::InputBuffer  in,
 
     engine.SetRetriggerThreshold(calibrationMode ? pendingEnvelopeThreshold
                                                  : envelopeThreshold);
-    engine.SetGainCompensation(gainCompensation);
+    engine.SetGainCompensation(ActiveGain());
     engine.SetBypassed(bypassed);
     engine.SetRetriggerEnabled(dipSwitch2On);
 
