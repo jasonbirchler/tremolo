@@ -55,7 +55,7 @@ test: $(TEST_BIN) $(TRIPLE_TEST_BIN)
 TRIPLE_TEST_BIN = $(TEST_DIR)/triple_buffer_test
 $(TRIPLE_TEST_BIN): test/triple_buffer_test.cpp src/midi_bridge.h src/tremolo_engine.h src/tremolo_engine.cpp
 	@mkdir -p $(TEST_DIR)
-	$(HOST_CXX) -std=c++14 -O2 -Wall -Wextra -pthread -Isrc \
+	$(HOST_CXX) -std=c++14 -O2 -Wall -Wextra -pthread -Isrc -I$(DAISYSP_DIR)/Source \
 		test/triple_buffer_test.cpp src/tremolo_engine.cpp -o $@
 
 $(TEST_BIN): $(TEST_SRC) src/tremolo_engine.h
